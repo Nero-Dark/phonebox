@@ -415,6 +415,11 @@ public sealed class DiscordConfig
     /// enabled page, allows them.
     /// </summary>
     public bool AllowControl { get; set; }
+    /// <summary>
+    /// Screen share from the phone (off by default). Asks Discord for rpc.screenshare.read / .write, so Discord asks to
+    /// approve PhoneBox again; lists the apps with a window (names only) while the share view is open on the phone.
+    /// </summary>
+    public bool ScreenShare { get; set; }
 }
 
 public sealed class SteamConfig

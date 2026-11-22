@@ -821,6 +821,16 @@ html.beat-4 .obs-pill.on .obs-led { box-shadow: 0 0 34px rgba(239, 68, 68, .9); 
 .dc-btn.busy, .dc-chan.busy { opacity: .55; }
 .dc-btn.mode.on { background: rgba(245, 158, 11, .2); border-color: rgba(245, 158, 11, .5); }
 .dc-warn { font-size: 12px; color: #fbbf24; padding: 4px 8px; border-left: 3px solid #f59e0b; background: rgba(245, 158, 11, .08); border-radius: 6px; }
+/* screen share: 🖥️ in the top row, then Discord's picker, the running apps, or Stop */
+.dc-btn.share.on { background: rgba(88, 101, 242, .28); border-color: rgba(88, 101, 242, .6); }
+.dc-share { flex: none; border: none; border-radius: 12px; background: #5865f2; color: #fff; font: inherit; font-weight: 700; padding: 10px; }
+.dc-share.stop { background: #da373c; }
+.dc-share:disabled, .dc-app:disabled { opacity: .4; }
+.dc-share.busy, .dc-app.busy { opacity: .55; }
+.dc-sharing { flex: none; font-size: 13px; font-weight: 600; color: #23a55a; }
+.dc-hint { flex: none; font-size: 11px; color: var(--muted); }
+.dc-apps { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.dc-app { flex: none; border: none; background: rgba(255, 255, 255, .06); color: var(--text); border-radius: 9px; font: inherit; font-size: 13px; padding: 8px 10px; text-align: start; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dc-members { display: flex; flex-wrap: wrap; gap: 5px; }
 .dc-member { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: rgba(88, 101, 242, .22); }
 .dc-member.muted, .dc-member.deaf { background: rgba(255, 255, 255, .07); color: var(--muted); }

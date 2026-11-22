@@ -29,6 +29,10 @@ public sealed record DiscordSnapshot(bool Connected, string? Error, string? User
 public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMonitor> log) : BackgroundService
 {
     private static readonly string[] Scopes = ["rpc", "rpc.voice.read", "rpc.voice.write", "rpc.notifications.read"];
+    /// <summary>Only asked for while screen share is on (<see cref="DiscordConfig.ScreenShare"/>), so nobody else has to approve PhoneBox again.</summary>
+    internal static readonly string[] ShareScopes = ["rpc.screenshare.read", "rpc.screenshare.write"];
+    /// <summary>The permissions the settings want beyond the base ones (<see cref="Scopes"/>).</summary>
+    internal static string[] ExtraScopes(DiscordConfig cfg) => cfg.ScreenShare ? ShareScopes : [];
     private const string Redirect = "http://127.0.0.1";
     private static readonly string[] SpeakingEvents = ["SPEAKING_START", "SPEAKING_STOP"];
 
@@ -119,7 +123,27 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
     }
 
     /// <summary>The user cancelled, the approval timed out or Discord refused the secret: retrying cannot help until the settings change.</summary>
-    private sealed class LoginRefusedException(string message) : Exception(message);
+    /// <param name="prompt">Whether the approval itself was declined or not answered in time (not a failure after it).</param>
+    private sealed class LoginRefusedException(string message, bool prompt = false) : Exception(message) { public bool Prompt => prompt; }
+
+    // The permissions of the current login, and the optional ones (ExtraScopes) that were declined, each on its own. A
+    // declined one is not asked for again until its setting goes off, the client ID or secret changes or Discord is
+    // switched off and on.
+    private volatile string[] _granted = [];
+    private readonly HashSet<string> _declined = []; // only touched by the connection's own loop, like _declinedFor
+    private (string? Id, string? Secret) _declinedFor;
+
+    /// <summary>The optional permissions to ask for: those the settings want now, without the declined ones.</summary>
+    private string[] WantedScopes(DiscordConfig cfg)
+    {
+        var extras = ExtraScopes(cfg);
+        if (_declinedFor != (cfg.ClientId, cfg.ClientSecret)) { _declinedFor = (cfg.ClientId, cfg.ClientSecret); _declined.Clear(); }
+        _declined.IntersectWith(extras); // its setting is off: turned on again, it is asked for again
+        return [.. extras.Where(s => !_declined.Contains(s))];
+    }
+
+    /// <summary>A setting that needs another permission was turned on: log in again to ask for it, unless it was declined.</summary>
+    internal bool NeedsLogin(DiscordConfig cfg) => WantedScopes(cfg).Except(_granted).Any();
 
     private volatile bool _loggedIn;
 
@@ -134,7 +158,7 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
         while (!ct.IsCancellationRequested)
         {
             var cfg = config.Get().Discord;
-            if (!cfg.Enabled) { _snap = Empty(null); refusedFor = null; failures = 0; await Task.Delay(2000, ct); continue; }
+            if (!cfg.Enabled) { _snap = Empty(null); refusedFor = null; _declined.Clear(); failures = 0; await Task.Delay(2000, ct); continue; }
             // After a refused login, stay quiet (no new prompt, no new token request) until the client ID or secret change or Discord is switched off and on.
             if (refusedFor is { } refused && refused == (cfg.ClientId, cfg.ClientSecret)) { await Task.Delay(2000, ct); continue; }
             refusedFor = null;
@@ -179,6 +203,8 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
             _loggedIn = true;
             log.LogInformation("discord: connected");
             var subscribed = false;
+            _shareSubscribed = false;
+            _shareRefused = false;
             _guildChannels.Clear();
             var channelsAt = DateTime.MinValue;
             var channelsEvery = TimeSpan.FromSeconds(60);
@@ -186,7 +212,7 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
             long roomsAt = 0; // when the last read was started
             string? speakingFor = null;
             long speakingRetryAt = 0; // after a failed (un)subscribe: when to set the channel's subscriptions up again
-            while (!ct.IsCancellationRequested && !reader.IsCompleted && config.Get().Discord.Enabled)
+            while (!ct.IsCancellationRequested && !reader.IsCompleted && config.Get().Discord is { Enabled: true } now && !NeedsLogin(now))
             {
                 // Notification text (DM content) is only asked for, and only sent on, while a widget shows it.
                 var wantNotes = NotificationsWanted(config.Get());
@@ -197,6 +223,7 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
                     if (!wantNotes) lock (_lock) _notes.Clear();
                     _notesWanted = wantNotes;
                 }
+                await FollowShare(ct);
                 if (DateTime.UtcNow - channelsAt > channelsEvery)
                 {
                     channelsEvery = await RefreshVoiceChannels(ct) ? TimeSpan.FromSeconds(60) : TimeSpan.FromSeconds(10);
@@ -243,6 +270,8 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
             _io = null;
             _notesWanted = false;
             SpeakingChannel = null;
+            _granted = [];
+            ClearShare();
             stop.Cancel();
             try { await reader; } catch { }
             if (roomsTask is not null) try { await roomsTask; } catch { }
@@ -256,23 +285,55 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
         }
     }
 
-    // AUTHORIZE (asks you in Discord, once) → token exchange → AUTHENTICATE. Tokens are kept in the settings folder.
-    private async Task<string> Authenticate(DiscordConfig cfg, CancellationToken ct)
+    /// <summary>
+    /// Logs in with the saved login, or asks you in Discord (once) and saves the answer in the settings folder. With an
+    /// optional permission wanted that the saved login lacks, Discord is asked for it first; when that is declined, not
+    /// answered or not granted, only its feature stays off: the login goes on with the base permissions.
+    /// </summary>
+    internal async Task<string> Authenticate(DiscordConfig cfg, CancellationToken ct)
     {
+        _granted = [];
+        var wanted = WantedScopes(cfg);
         var tokens = LoadTokens(cfg.ClientId!);
-        if (tokens is not null && tokens.Expires < DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeSeconds())
-            tokens = await Exchange(cfg, new() { ["grant_type"] = "refresh_token", ["refresh_token"] = tokens.Refresh }, ct);
-        if (tokens is not null)
+        string? user = null;
+        // a login saved by a version that didn't keep the scopes was never asked for any of the optional ones
+        if (!HasScopes(tokens?.Scope, wanted))
         {
-            try { return await Auth(tokens.Access, ct); } catch (Exception ex) { log.LogInformation("discord: saved login no longer works ({Msg})", ex.Message); }
+            try { user = await Login(cfg, wanted, ct); }
+            catch (LoginRefusedException ex) when (ex.Prompt || tokens is not null)
+            {
+                string[] declined = [.. wanted.Where(s => !HasScopes(tokens?.Scope, s))]; // the saved login keeps the others
+                log.LogInformation("discord: {Msg} Going on without {Scopes}.", ex.Message, string.Join(' ', declined));
+                _declined.UnionWith(declined);
+            }
         }
+        if (user is null && tokens is not null)
+        {
+            if (tokens.Expires < DateTimeOffset.UtcNow.AddMinutes(5).ToUnixTimeSeconds())
+            {
+                tokens = await Exchange(cfg, new() { ["grant_type"] = "refresh_token", ["refresh_token"] = tokens.Refresh }, ct, tokens.Scope);
+                if (tokens is not null) SaveTokens(tokens); // at once: the refresh token it replaces may no longer work
+            }
+            if (tokens is not null)
+                try { user = await Auth(tokens, ct); } catch (Exception ex) { log.LogInformation("discord: saved login no longer works ({Msg})", ex.Message); }
+        }
+        user ??= await Login(cfg, WantedScopes(cfg), ct);
+        // logged in, but without a permission that was wanted: asking again every pass would not change that
+        _declined.UnionWith(wanted.Except(_granted));
+        return user;
+    }
+
+    // AUTHORIZE (asks you in Discord) → token exchange → AUTHENTICATE
+    private async Task<string> Login(DiscordConfig cfg, string[] extras, CancellationToken ct)
+    {
         const string retry = " PhoneBox will not ask again until you change the Discord settings (or turn Discord off and save, wait a few seconds, then turn it on and save again).";
         JsonNode? granted;
-        try { granted = await Request("AUTHORIZE", AuthorizeArgs(cfg.ClientId), null, ct, TimeSpan.FromMinutes(2)); }
-        catch (TimeoutException) { throw new LoginRefusedException("PhoneBox was not approved in Discord in time." + retry); }
-        catch (Exception ex) when (ex is not (OperationCanceledException or IOException)) { throw new LoginRefusedException(Refusal(ex.Message) + retry); }
+        try { granted = await Request("AUTHORIZE", AuthorizeArgs(cfg.ClientId, extras), null, ct, TimeSpan.FromMinutes(2)); }
+        catch (TimeoutException) { throw new LoginRefusedException("PhoneBox was not approved in Discord in time." + retry, prompt: true); }
+        catch (Exception ex) when (ex is not (OperationCanceledException or IOException)) { throw new LoginRefusedException(Refusal(ex.Message) + retry, prompt: true); }
         // no answer at all means the connection ended (Discord closed or restarted): that is not a refusal
         var code = granted?["code"]?.GetValue<string>() ?? throw new IOException("Discord closed the connection");
+        Tokens? tokens;
         try { tokens = await Exchange(cfg, new() { ["grant_type"] = "authorization_code", ["code"] = code, ["redirect_uri"] = Redirect }, ct); }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
         {
@@ -282,7 +343,7 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
         }
         tokens = tokens
             ?? throw new LoginRefusedException("Discord refused the client secret or the redirect (add http://127.0.0.1 under OAuth2 › Redirects)." + retry);
-        try { return await Auth(tokens.Access, ct); }
+        try { return await Auth(tokens, ct, isNew: true); }
         catch (Exception ex) when (ex is not (OperationCanceledException or IOException)) { throw new LoginRefusedException($"Discord refused the new login ({ex.Message})." + retry); }
     }
 
@@ -293,11 +354,11 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
     /// redirect, which the token exchange then names (<see cref="Redirect"/>). An application with no saved redirect
     /// gets <c>invalid_request: Missing "redirect_uri"</c>, with or without <c>response_type</c> (#316, <see cref="Refusal"/>).
     /// </summary>
-    internal static JsonObject AuthorizeArgs(string? clientId) => new()
+    internal static JsonObject AuthorizeArgs(string? clientId, params string[] extras) => new()
     {
         ["client_id"] = clientId,
         ["response_type"] = "code",
-        ["scopes"] = new JsonArray(Scopes.Select(s => (JsonNode)s).ToArray()),
+        ["scopes"] = new JsonArray(Scopes.Concat(extras).Select(s => (JsonNode)s).ToArray()),
     };
 
     /// <summary>
@@ -309,13 +370,26 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
             ? $"Discord login was refused ({discordMessage}). Add {Redirect} under OAuth2 › Redirects in the Discord Developer Portal and click Save Changes."
             : $"Discord login was refused ({discordMessage}).";
 
-    private async Task<string> Auth(string token, CancellationToken ct)
+    /// <summary>Whether a space-separated scope list (the token answer's <c>scope</c>) holds every one of <paramref name="wanted"/>.</summary>
+    internal static bool HasScopes(string? scopes, params string[] wanted) =>
+        !wanted.Except(scopes?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? []).Any();
+
+    /// <param name="isNew">A login just approved: saved once Discord takes it, so one it refuses never replaces a login that works.</param>
+    private async Task<string> Auth(Tokens tokens, CancellationToken ct, bool isNew = false)
     {
-        var r = await Request("AUTHENTICATE", new JsonObject { ["access_token"] = token }, null, ct);
+        var r = await Request("AUTHENTICATE", new JsonObject { ["access_token"] = tokens.Access }, null, ct);
+        // Discord names the scopes of this login; the token answer's list is the fallback
+        _granted = r?["scopes"] is JsonArray scopes ? [.. scopes.Select(JsonStr).OfType<string>()] : tokens.Scope?.Split(' ') ?? [];
+        // A permission taken back in Discord (also while its setting is off): the saved login must not claim it any longer,
+        // or turning the setting on would not ask for it.
+        var withdrawn = r?["scopes"] is JsonArray && (tokens.Scope?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? []).Except(_granted).Any();
+        if (withdrawn) SaveTokens(tokens with { Scope = string.Join(' ', _granted) });
+        else if (isNew && r is not null) SaveTokens(tokens);
         return r?["user"]?["global_name"]?.GetValue<string>() ?? r?["user"]?["username"]?.GetValue<string>() ?? "Discord";
     }
 
-    private sealed record Tokens(string ClientId, string Access, string Refresh, long Expires);
+    /// <param name="Scope">The scopes Discord granted, space separated (missing in a login saved by an older version).</param>
+    private sealed record Tokens(string ClientId, string Access, string Refresh, long Expires, string? Scope = null);
 
     /// <summary>
     /// discord-token.json next to the settings file; a settings file that is itself named so (--config) gets a sidecar
@@ -341,10 +415,12 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
         catch { return null; }
     }
 
-    private async Task<Tokens?> Exchange(DiscordConfig cfg, Dictionary<string, string> form, CancellationToken ct)
+    internal Func<HttpClient> TokenHttp = () => new() { Timeout = TimeSpan.FromSeconds(15) }; // internal for tests
+
+    private async Task<Tokens?> Exchange(DiscordConfig cfg, Dictionary<string, string> form, CancellationToken ct, string? scope = null)
     {
         form["client_id"] = cfg.ClientId!; form["client_secret"] = cfg.ClientSecret!;
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        using var http = TokenHttp();
         using var res = await http.PostAsync("https://discord.com/api/oauth2/token", new FormUrlEncodedContent(form), ct);
         // 400 and 401 are OAuth2's answers for a rejected code, redirect or client secret (RFC 6749 5.2); anything else
         // (429, 5xx) is Discord having a moment, so it takes the reconnect back-off instead of counting as a refusal
@@ -352,10 +428,13 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
         if (!res.IsSuccessStatusCode) throw new HttpRequestException($"Discord's token service answered HTTP {(int)res.StatusCode}");
         var j = JsonNode.Parse(await res.Content.ReadAsStringAsync(ct));
         var t = new Tokens(cfg.ClientId!, j?["access_token"]?.GetValue<string>() ?? "", j?["refresh_token"]?.GetValue<string>() ?? "",
-            DateTimeOffset.UtcNow.ToUnixTimeSeconds() + (j?["expires_in"]?.GetValue<long>() ?? 3600));
-        if (t.Access == "") return null;
+            DateTimeOffset.UtcNow.ToUnixTimeSeconds() + (j?["expires_in"]?.GetValue<long>() ?? 3600), JsonStr(j?["scope"]) ?? scope);
+        return t.Access == "" ? null : t;
+    }
+
+    private void SaveTokens(Tokens t)
+    {
         try { var tokenPath = TokenPath; Directory.CreateDirectory(Path.GetDirectoryName(tokenPath)!); AppPaths.WriteAllTextPrivate(tokenPath, JsonSerializer.Serialize(t)); } catch (Exception ex) { log.LogDebug(ex, "discord: could not save the login"); }
-        return t;
     }
 
     // Voice channels per server, kept between refreshes: a server Discord does not answer for right now keeps its last list.
@@ -524,6 +603,11 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
                     ApplySpeaking(evt, obj["data"]);
                     continue;
                 }
+                if (evt == "SCREENSHARE_STATE_UPDATE" && JsonStr(obj["cmd"]) == "DISPATCH")
+                {
+                    OnShareState(obj["data"]);
+                    continue;
+                }
                 if (evt == "NOTIFICATION_CREATE")
                 {
                     if (!NotesNow() || obj["data"] is not JsonObject d) continue;
@@ -541,6 +625,7 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
         finally
         {
             _notesWanted = false;
+            ClearShare();
             lock (_lock)
             {
                 _closed = true; // a poll still finishing for this connection must not bring "connected" back
@@ -650,8 +735,11 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
     /// <see cref="DiscordConfig.AllowControl"/> switch (off by default) for shortcuts and custom widgets.
     /// </summary>
     public static bool ControlAllowed(AgentConfig cfg) =>
-        cfg.Discord.AllowControl
-        || cfg.Widgets(enabledPagesOnly: true).Any(w => w.Type == "discord" && w.Bool("control") == true);
+        cfg.Discord.AllowControl || WidgetControl(cfg);
+
+    /// <summary>A Discord widget with the control option on, on a page that is enabled: the global switch does not count.</summary>
+    public static bool WidgetControl(AgentConfig cfg) =>
+        cfg.Widgets(enabledPagesOnly: true).Any(w => w.Type == "discord" && w.Bool("control") == true);
 
     // Discord answers a settings change with the new settings; take the state from that, not from the next poll.
     internal void ApplyVoice(JsonNode? vs)

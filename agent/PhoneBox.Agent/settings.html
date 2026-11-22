@@ -661,6 +661,8 @@ nav a.on::before { color: var(--accent); }
         </div>
         <div class="row" style="margin:12px 0 4px"><label class="switch"><input type="checkbox" data-bind="discord.allowControl" aria-labelledby="discordAllowControlLabel"><span></span></label> <span id="discordAllowControlLabel" data-i18n="s.discord.allowControl">Let shortcuts and custom widgets control Discord, without a Discord widget</span></div>
         <p class="hint" style="margin:0" data-i18n="s.discord.allowControlHint">For the agent's /api/discord actions: mute, deafen, input mode, leave and join. Off: they work only while a Discord widget with Control on is on an enabled page. On: they work without one. Either way, anything that can call the agent can use them, not only the widget: the paired phone (USB or Wi-Fi) and programs on this computer.</p>
+        <div class="row" style="margin:12px 0 4px"><label class="switch"><input type="checkbox" data-bind="discord.screenShare" aria-labelledby="discordScreenShareLabel"><span></span></label> <span id="discordScreenShareLabel" data-i18n="s.discord.screenShare">Start and stop Discord screen shares from the phone</span></div>
+        <p class="hint" style="margin:0" data-i18n="s.discord.screenShareHint">Asks Discord for permission to start screen shares, so Discord asks you to approve PhoneBox once more. While the share view is open on the phone, PhoneBox lists the apps with a window on this computer (names only). Discord decides what it can share directly; for anything else use its picker on the computer. Also needs a Discord widget with Control on.</p>
       </div>
 
       <div class="card">

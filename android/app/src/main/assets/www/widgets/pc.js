@@ -184,6 +184,63 @@ W.discord = {
       await new Promise((done) => setTimeout(done, 600));
       await load(); busy = null; render(true);
     };
+    // Screen share (its own switch in Settings › General › Discord, and control): 🖥️ switches to the share view. The
+    // running apps (names only) are asked for only while that view is open on screen.
+    let shareOpen = false, share = null, shareBusy = null;
+    let shareWaiting = 0;
+    const loadShare = async () => {
+      shareWaiting++;
+      try { share = await api('/discord/share?apps=true', undefined, 8000); } catch (_) {} finally { shareWaiting--; }
+    };
+    // what the agent answers (DiscordShareError.Code), in the panel's language; anything else is "Discord didn't do it"
+    const SHARE_ERRORS = { off: 'w.discord.shareOff', notAllowed: 'w.discord.shareApprove', unknown: 'w.discord.shareUnknown', noCall: 'w.discord.shareJoin',
+      sharing: 'w.discord.shareAlready', gone: 'w.discord.shareGone', notDirect: 'w.discord.shareNotDirect' };
+    const shareAct = async (action, pid) => {
+      if (shareBusy) return;
+      haptic();
+      shareBusy = action + (pid || ''); render(true);
+      // Longer than the agent waits for a share to start. Never sent again by itself: the same command starts and stops.
+      const ctl = new AbortController();
+      let timer;
+      const deadline = new Promise((_, fail) => { timer = setTimeout(() => { ctl.abort(); fail(new Error('timeout')); }, 12000); });
+      try {
+        await Promise.race([deadline, (async () => {
+          const r = await fetch(`${API}/discord/share/${action}` + (pid ? '?pid=' + pid : ''), { method: 'POST', cache: 'no-store', headers: PANEL_HEADERS, signal: ctl.signal });
+          if (r.ok) return;
+          const { code } = await r.json().catch(() => ({}));
+          toast(t(SHARE_ERRORS[code] || 'w.discord.failed'), 'err');
+        })()]);
+      } catch (_) { toast(t('panel.pcNoAnswer'), 'err'); } finally { clearTimeout(timer); shareBusy = null; }
+      if (shareOpen && visible()) await loadShare(); // closed or off screen meanwhile: the apps are not asked for
+      render(true);
+    };
+    const shareView = () => {
+      const c = share;
+      if (!c) return [h('div', 'empty', t('w.loading'))];
+      if (!c.enabled) return [h('div', 'empty', t('w.discord.shareOff'))];
+      if (!c.ready) return [h('div', 'empty', c.refused ? t('w.discord.shareRefused') : c.error || t('w.discord.shareApprove'))];
+      if (c.active === null) return [h('div', 'empty', t('w.discord.shareUnknown'))];
+      const out = [];
+      if (c.active) {
+        const stop = h('button', 'dc-share stop' + (shareBusy === 'stop' ? ' busy' : ''), emo('⏹️'), ' ', t('w.discord.shareStop'));
+        if (!shareBusy) stop.addEventListener('click', () => shareAct('stop')); else stop.disabled = true;
+        out.push(h('div', 'dc-sharing', h('span', null, c.name ? t('w.discord.sharing', { name: c.name }) : t('w.discord.sharingNow'))), stop);
+        return out;
+      }
+      if (!c.inCall) out.push(h('div', 'dc-hint', t('w.discord.shareJoin')));
+      const pick = h('button', 'dc-share' + (shareBusy === 'pick' ? ' busy' : ''), emo('🖥️'), ' ', t('w.discord.sharePick'));
+      if (c.inCall && !shareBusy) pick.addEventListener('click', () => shareAct('pick')); else pick.disabled = true;
+      out.push(pick);
+      if (c.apps?.length) {
+        out.push(h('div', 'dc-hint', t('w.discord.shareHint')));
+        out.push(h('div', 'dc-apps', ...c.apps.map((a) => {
+          const b = h('button', 'dc-app' + (shareBusy === 'app' + a.pid ? ' busy' : ''), a.name);
+          if (c.inCall && !shareBusy) b.addEventListener('click', () => shareAct('app', a.pid)); else b.disabled = true;
+          return b;
+        })));
+      }
+      return out;
+    };
     // Who is speaking changes several times a second: that only moves the ring on the chips already drawn, since a full
     // redraw recreates every avatar and server icon and they flash while they load again.
     const rings = new Map();
@@ -191,7 +248,7 @@ W.discord = {
     const render = (force = false) => {
       const s0 = data?.snapshot;
       const quiet = s0?.members ? { ...data, snapshot: { ...s0, members: s0.members.map(({ speaking, ...m }) => m) } } : data;
-      const key = JSON.stringify([quiet, busy, [...open], box.clientHeight, editing, saving, o.favGuilds, o.favChannels]);
+      const key = JSON.stringify([quiet, busy, [...open], box.clientHeight, editing, saving, o.favGuilds, o.favChannels, shareOpen, shareBusy, shareOpen ? share : null]);
       if (!force && key === lastKey) { ring(); return; }
       lastKey = key;
       rings.clear();
@@ -202,6 +259,16 @@ W.discord = {
       const ctl = data.control;
       // Push to talk counts as "on" for the input mode button: it is the mode where you are silent until you press a key.
       const ptt = s.inputMode === 'PUSH_TO_TALK';
+      const shareBtn = () => {
+        if (!data.share) { shareOpen = false; return null; }
+        const b = labelled(h('button', 'dc-btn share' + (shareOpen ? ' on' : ''), emo('🖥️')), t(shareOpen ? 'w.discord.closeShare' : 'w.discord.share'));
+        b.addEventListener('click', () => {
+          haptic(); shareOpen = !shareOpen;
+          if (shareOpen) { share = null; loadShare().then(() => render(true)); }
+          render(true);
+        });
+        return b;
+      };
       const btn = (cls, label, on, action) => {
         const b = labelled(h('button', 'dc-btn ' + cls + (on ? ' on' : '') + (busy === action ? ' busy' : ''), label),
           t({ mute: on ? 'w.a.unmuteMic' : 'w.a.muteMic', deafen: on ? 'w.a.undeafen' : 'w.a.deafen', leave: 'w.a.leave',
@@ -214,9 +281,11 @@ W.discord = {
         s.channelKind ? h('span', 'dc-kind', s.channelKind) : null,
         btn('mute', emo(s.muted ? '🔇' : '🎙️'), s.muted, 'mute'), btn('deaf', emo(s.deafened ? '🔕' : '🎧'), s.deafened, 'deafen'),
         s.inputMode ? btn('mode', emo(ptt ? '✋' : '🗣️'), ptt, 'inputmode') : null,
-        s.channelId ? btn('leave', emo('📞'), false, 'leave') : null)];
+        s.channelId ? btn('leave', emo('📞'), false, 'leave') : null,
+        shareBtn())];
       // Push to talk without a key in Discord: nobody hears you, and nothing else on screen says so.
       if (ptt && !s.pttKey) kids.push(h('div', 'dc-warn', t('w.discord.pttNoKey')));
+      if (shareOpen) { box.replaceChildren(...kids, ...shareView()); return; }
       if (s.channelId && s.members.length) {
         kids.push(h('div', 'dc-members', ...s.members.map((m) => {
           const chip = h('span', 'dc-member' + (m.deafened ? ' deaf' : m.muted ? ' muted' : '') + (m.speaking ? ' speaking' : ''), ico(m.avatar && img('user', m.id, m.avatar), m.name), rich((m.deafened ? '🔕 ' : m.muted ? '🔇 ' : '') + m.name));
@@ -316,8 +385,15 @@ W.discord = {
       // the pace follows the answer just received, so joining or leaving a channel changes it at once
       load().then(() => { asking = false; next = Date.now() + (data?.snapshot?.channelId ? 500 : 2000); render(); });
     };
+    // the open share view is asked every 2 s, only while it is open and on screen, beside the poll above
+    let shareNext = 0;
+    const pollShare = () => {
+      if (!shareOpen || shareWaiting || shareBusy || !visible() || Date.now() < shareNext) return;
+      shareNext = Date.now() + 2000;
+      loadShare().then(() => render());
+    };
     // 'fast' (every 250 ms) drives the asking; 'tick' (every second) also redraws when the widget's size changes
-    return { update: (kind) => { poll(); if (kind !== 'fast') render(); } };
+    return { update: (kind) => { poll(); pollShare(); if (kind !== 'fast') render(); } };
   },
 };
 

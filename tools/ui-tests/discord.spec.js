@@ -293,6 +293,142 @@ test('without favourites every server shows', async ({ page }) => {
   await expect(page.locator('.dc-room')).toHaveCount(2); // Friends is unfolded: Game night and Lounge
 });
 
+// screen share (discord.screenShare in the settings); answers: url -> what the demo's answer is replaced with
+async function showShare(page, { screenShare = true, options = { control: true }, answers = [], allowControl = false } = {}) {
+  await page.addInitScript((answers) => {
+    window.__share = [];
+    const wrap = () => {
+      const f = window.fetch;
+      if (!f || f.__share) return;
+      const g = async (input, init) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (!url.includes('/discord/share')) return f(input, init);
+        window.__share.push(url.replace(/^.*\/discord/, ''));
+        const patch = answers.find((x) => new RegExp(x.url).test(url));
+        if (patch?.delay) await new Promise((done) => setTimeout(done, patch.delay));
+        const r = await f(input, init);
+        return patch?.json ? new Response(JSON.stringify({ ...(await r.json()), ...patch.json }), { status: patch.status || 200, headers: { 'Content-Type': 'application/json' } }) : r;
+      };
+      g.__share = true;
+      window.fetch = g;
+    };
+    setInterval(wrap, 10);
+  }, answers);
+  await page.goto('/panel/');
+  await page.evaluate(([screenShare, options, allowControl]) => {
+    localStorage.clear();
+    localStorage.setItem('pb-demo-config', JSON.stringify({ night: { enabled: false }, rules: [], shortcuts: [], discord: { screenShare, allowControl },
+      pages: [{ id: 'dc', title: 'Discord', enabled: true, widgets: [{ id: 'd', type: 'discord', x: 0, y: 0, w: 6, h: 5, options }] }] }));
+  }, [screenShare, options, allowControl]);
+  await page.reload();
+  await expect(page.locator('.w-discord .dc-top')).toBeVisible();
+}
+
+test('screen share shows only with its setting and control on', async ({ page }) => {
+  await showShare(page, { screenShare: false });
+  await expect(page.locator('.dc-btn.share')).toHaveCount(0);
+  await showShare(page, { options: {} });
+  await expect(page.locator('.dc-btn.share')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__share)).toEqual([]);
+});
+
+test('screen share needs the widget\'s control, not only the global switch', async ({ page }) => {
+  await showShare(page, { options: {}, allowControl: true });
+  await expect(page.locator('.dc-btn.mute')).toBeEnabled();                 // the global switch allows the voice actions
+  await expect(page.locator('.dc-btn.share')).toHaveCount(0);
+});
+
+test('an app is shared and stopped, and the apps are asked for only while the view is open', async ({ page }) => {
+  const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
+  await showShare(page);
+  const button = page.locator('.dc-btn.share');
+  await expect(button).toBeVisible();
+  await page.waitForTimeout(2500);
+  expect(await page.evaluate(() => window.__share)).toEqual([]);
+  await button.click();
+  await expect(page.locator('.dc-app')).toHaveText(['Space Racers', 'Firefox', 'Visual Studio Code']);
+  expect(await page.evaluate(() => window.__share[0])).toBe('/share?apps=true');
+  await page.locator('.dc-app', { hasText: 'Space Racers' }).click();
+  await expect(page.locator('.dc-sharing')).toHaveText('Sharing Space Racers');
+  await expect(page.locator('.dc-app')).toHaveCount(0);
+  await page.locator('.dc-share.stop').click();
+  await expect(page.locator('.dc-app')).toHaveCount(3);
+  await page.locator('.dc-share').click();                                  // Choose on PC
+  await expect(page.locator('.dc-share.stop')).toBeVisible();
+  await button.click();                                                      // back to the channels
+  await expect(page.locator('.dc-members')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('an app Discord cannot share directly says so in the panel language', async ({ page }) => {
+  await showShare(page);
+  await page.locator('.dc-btn.share').click();
+  await page.locator('.dc-app', { hasText: 'Firefox' }).click();
+  await expect(page.getByText("Discord can't share this app directly: use Choose on PC")).toBeVisible();
+  await expect(page.locator('.dc-app', { hasText: 'Firefox' })).toBeEnabled();
+});
+
+test('outside a call, and before Discord has said whether you share, nothing can be started', async ({ page }) => {
+  await showShare(page, { answers: [{ url: 'share\\?', json: { inCall: false } }] });
+  await page.locator('.dc-btn.share').click();
+  await expect(page.locator('.dc-hint').first()).toHaveText('Join a voice channel to share');
+  await expect(page.locator('.dc-share')).toBeDisabled();
+  await expect(page.locator('.dc-app').first()).toBeDisabled();
+});
+
+test('a share without a name still offers Stop', async ({ page }) => {
+  await showShare(page, { answers: [{ url: 'share\\?', json: { active: true, name: null } }] });
+  await page.locator('.dc-btn.share').click();
+  await expect(page.locator('.dc-sharing')).toHaveText('You are sharing');
+  await expect(page.locator('.dc-share.stop')).toBeEnabled();
+});
+
+test('an unknown share state offers no buttons', async ({ page }) => {
+  await showShare(page, { answers: [{ url: 'share\\?', json: { active: null } }] });
+  await page.locator('.dc-btn.share').click();
+  await expect(page.locator('.w-discord .empty')).toHaveText("Discord hasn't said yet whether you are sharing");
+  await expect(page.locator('.dc-share, .dc-app')).toHaveCount(0);
+});
+
+test('a declined permission says so in the share view, and the buttons keep working', async ({ page }) => {
+  await showShare(page, { answers: [{ url: 'share\\?', json: { ready: false, error: null } }] });
+  await page.locator('.dc-btn.share').click();
+  await expect(page.locator('.w-discord .empty')).toHaveText('Approve PhoneBox in Discord to share your screen');
+  await page.locator('.dc-btn.mute').click();
+  await expect(page.locator('.dc-btn.mute')).toHaveClass(/\bon\b/);
+});
+
+test('closing the view while an action runs does not ask for the apps afterwards', async ({ page }) => {
+  await showShare(page, { answers: [{ url: 'share/app', delay: 1500 }] });
+  await page.locator('.dc-btn.share').click();
+  await page.locator('.dc-app', { hasText: 'Space Racers' }).click();
+  await page.locator('.dc-btn.share').click();
+  await page.evaluate(() => { window.__share.length = 0; });
+  await page.waitForTimeout(3000);
+  expect(await page.evaluate(() => window.__share)).toEqual([]);
+});
+
+test('an action that ends while the panel is off screen does not ask for the apps', async ({ page }) => {
+  await showShare(page, { answers: [{ url: 'share/app', delay: 1500 }] });
+  await page.locator('.dc-btn.share').click();
+  await page.locator('.dc-app', { hasText: 'Space Racers' }).click();
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    window.__share.length = 0;
+  });
+  await page.waitForTimeout(3000);
+  expect(await page.evaluate(() => window.__share)).toEqual([]);
+});
+
+test('an action that is never answered frees the buttons again', async ({ page }) => {
+  await showShare(page, { answers: [{ url: 'share/pick', delay: 60000 }] });
+  await page.locator('.dc-btn.share').click();
+  await page.locator('.dc-share').click();
+  await expect(page.locator('.dc-share')).toBeDisabled();
+  await expect(page.locator('.dc-share')).toBeEnabled({ timeout: 15000 });
+  expect((await page.evaluate(() => window.__share)).filter((u) => u.startsWith('/share/pick'))).toHaveLength(1); // not sent again by itself
+});
+
 test('the ring moves without redrawing the widget, so avatars and server icons do not flash', async ({ page }) => {
   await show(page);
   const ada = page.locator('.dc-member', { hasText: 'Ada' });

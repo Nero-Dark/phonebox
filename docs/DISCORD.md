@@ -84,11 +84,34 @@ channels are not asked, and none are while the widget's **Channels** option is o
 The phone only sends the id of a server or channel the agent itself listed, and the agent changes nothing but that
 widget's two favourite lists (`favGuilds`, `favChannels`).
 
+## Screen share
+
+**Settings › General › Discord › Start and stop Discord screen shares from the phone** (off by default; it also
+needs the **Control** option of a Discord widget on an enabled page, `discord.allowControl` is not enough) adds a 🖥️ button
+to the widget. While you are in a voice channel:
+
+- **Choose on PC** asks Discord to share: it shows its own picker on the computer (screens and windows), or goes live
+  with the game it detects.
+- The list below it holds the apps that have a window on this computer, **by name only** (no window titles), read only
+  while the share view is open on the phone. Tapping one asks Discord to share that app. Discord shares directly only
+  what it can (the games it detects); PhoneBox doesn't look games up anywhere, it watches whether the share starts and
+  otherwise tells you to use **Choose on PC**. Windows only; on Linux and macOS the list is empty.
+- **Stop sharing** ends the share. Discord uses one command to start and stop, so PhoneBox sends it only after Discord
+  has reported whether you are sharing (it does so right after PhoneBox connects).
+- Turning it on asks Discord for `rpc.screenshare.read` and `rpc.screenshare.write`, so **Discord asks you to approve
+  PhoneBox again** (the widget waits for your answer; an approval that isn't answered times out after two minutes). If you decline,
+  PhoneBox goes on with the permissions it had, or asks for the base ones when it had none, and only screen share stays
+  off. To be asked again, turn the setting off and on.
+- The commands and the permissions are not in Discord's public documentation, so a Discord update can change them. When
+  Discord refuses them, only screen share is off.
+
 ## What is requested
 
 The login asks for these Discord permissions, all of them on your own account and only through the local app:
-`rpc`, `rpc.voice.read`, `rpc.voice.write` and `rpc.notifications.read`. The client secret stays on the computer and is
-never sent to the phone. See the Discord row in [PRIVACY.md](../PRIVACY.md) for the connections involved.
+`rpc`, `rpc.voice.read`, `rpc.voice.write` and `rpc.notifications.read`, plus `rpc.screenshare.read` and
+`rpc.screenshare.write` only while screen share is on. Changing the requested permissions makes Discord ask you to approve
+PhoneBox again. The client secret stays on the computer and is never sent to the phone. See the Discord row in
+[PRIVACY.md](../PRIVACY.md) for the connections involved.
 
 ## Troubleshooting
 

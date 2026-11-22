@@ -696,7 +696,13 @@ app.MapGet("/api/discord", (DiscordMonitor dc, ConfigStore cfg) => Results.Json(
     enabled = cfg.Get().Discord.Enabled,
     snapshot = dc.Snapshot(),
     control = DiscordMonitor.ControlAllowed(cfg.Get()),
+    share = DiscordMonitor.ShareWanted(cfg.Get()),
 }));
+// Screen share (its own switch, off by default): the state, and the running apps (names only) while
+// the phone's share view is open. It needs a widget's control (the global switch is not enough). code: what went wrong, for the panel to say in its language.
+app.MapGet("/api/discord/share", (bool? apps, DiscordMonitor dc) => Results.Json(dc.Share(apps == true)));
+app.MapPost("/api/discord/share/{action}", async (string action, int? pid, DiscordMonitor dc) =>
+    await dc.ShareActAsync(action, pid) is { } e ? Results.BadRequest(new { error = e.Error, code = e.Code }) : Results.Ok(new { ok = true }));
 // Ids go in the query string: the Android app lets image requests through by exact path (READ_ONLY_IMAGES).
 app.MapGet("/api/discord/img", async (string kind, string id, string hash, DiscordMonitor dc, CancellationToken ct) =>
     await dc.ImageAsync(kind, id, hash, ct) is { } img
