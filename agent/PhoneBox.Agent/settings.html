@@ -845,9 +845,9 @@ nav a.on::before { color: var(--accent); }
       </div>
       <div class="card">
         <h3 data-i18n="s.wake.title">Wake the phone</h3>
-        <div class="row" style="margin-bottom:8px"><label class="switch"><input type="checkbox" data-bind="adbWake.enabled"><span></span></label> <span data-i18n="s.wake.enable">Wake the phone and swipe it open</span></div>
+        <div class="row" style="margin-bottom:8px"><label class="switch"><input type="checkbox" data-bind="adbWake.enabled" aria-labelledby="wakeEnableLabel"><span></span></label> <span id="wakeEnableLabel" data-i18n="s.wake.enable">Wake the phone and swipe it open</span></div>
         <div class="grid2">
-          <div class="field"><label data-i18n="s.wake.phoneToUse">Phone to wake</label><select id="wakeSerial"></select><span class="hint" data-i18n="s.wake.phoneToUseHint">Choose the phone to wake and unlock. Nothing chosen = the feature does nothing.</span></div>
+          <div class="field"><label for="wakeSerial" data-i18n="s.wake.phoneToUse">Phone to wake</label><select id="wakeSerial"></select><span class="hint" data-i18n="s.wake.phoneToUseHint">Choose the phone to wake and unlock. Nothing chosen = the feature does nothing.</span></div>
         </div>
         <p class="hint" data-i18n="s.wake.hint" style="margin:8px 0 0">When the screen is off the agent sends a wake key and swipes up; a locked screen is unlocked the same way. The phone must show PhoneBox on screen, and a PIN, pattern, or password is never forced open.</p>
       </div>
@@ -3666,7 +3666,7 @@ async function doSave() {
 }
 
 $('save').onclick = save;
-$('revert').onclick = () => { cfg = JSON.parse(saved); renderPages(); renderDeck(); renderRules(); renderCalendars(); renderFeeds(); renderCameras(); renderConsole(); renderNetAdapters(); renderPhones(); renderCharge(); bindForm(); changed(); };
+$('revert').onclick = () => { cfg = JSON.parse(saved); renderPages(); renderDeck(); renderRules(); renderCalendars(); renderFeeds(); renderCameras(); renderConsole(); renderNetAdapters(); renderPhones(); renderCharge(); bindForm(); loadInfo(); changed(); };
 // Over USB this also wakes the phone and brings the panel to the front (adb); over Wi-Fi the phone switches to the
 // page selected in the editor through the live stream.
 $('openPhone').onclick = async () => {

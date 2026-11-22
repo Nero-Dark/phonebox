@@ -60,6 +60,13 @@ public sealed class AdbReverse(ConfigStore cfg, ILogger<AdbReverse> log, AgentEn
     internal static void ResetSessionEnding() => Interlocked.Exchange(ref _endingSince, 0); // tests
     private static long _endingSince;
 
+    /// <summary>
+    /// Whether the computer's own screen is locked (macOS console session). The wake-and-unlock pass must not run
+    /// while it is: Settings › Display › follow the computer lock put the phone to sleep on purpose, and the
+    /// unlock path is the one that wakes and opens it again.
+    /// </summary>
+    internal static Func<bool> ComputerLocked { get; set; } = () => OperatingSystem.IsMacOS() && MacSessionLock.IsLocked() == true;
+
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
 #if WINDOWS
@@ -144,7 +151,11 @@ public sealed class AdbReverse(ConfigStore cfg, ILogger<AdbReverse> log, AgentEn
             if (problem is null && devices.Length > 0) log.LogInformation("USB: the phone is back on USB");
         }
         _missingApp = _missingApp.Where(devices.Contains).ToArray();
-        if (devices.Length == 0) { Report("no phone connected, waiting..."); return; }
+        // Settings › General › wake phone: its target is one of the attached phones, chosen independently of the
+        // panel phone selector, so it is checked even when no panel phone is attached.
+        var wakeSerial = cfg.Get().AdbWake.DeviceSerial?.Trim();
+        var wakeWanted = cfg.Get().AdbWake.Enabled && wakeSerial is { Length: > 0 } && _all.Contains(wakeSerial);
+        if (devices.Length == 0 && !wakeWanted) { Report("no phone connected, waiting..."); return; }
 
         // A phone that did not answer "reverse --list" sits out the rest of this round (home screen, keep awake): one
         // more failure there would end the round before the phones after it. The next round tries it again.
@@ -249,21 +260,24 @@ public sealed class AdbReverse(ConfigStore cfg, ILogger<AdbReverse> log, AgentEn
         else _awakeSet.Clear();
         // Settings › General › wake phone: the selected device's screen is polled, and when PhoneBox is the
         // screen the phone is woken (KEYCODE_WAKEUP) and swiped open so it lands in the panel. A device whose
-        // screen query fails sits out the rest of this round; the next round tries it again.
-        var wake = cfg.Get().AdbWake;
-        if (wake.Enabled && !string.IsNullOrWhiteSpace(wake.DeviceSerial))
+        // screen query fails sits out the rest of this round; the next round tries it again. The wake phone is
+        // chosen independently of the panel phone, so it is looked up in the full attached-device list, not the
+        // filtered one. It is never woken while the computer is locked with Settings › Display › follow the
+        // computer lock: the lock sync put the phone to sleep on purpose, and the unlock path wakes and opens it.
+        if (wakeWanted && wakeSerial is { } target && !unreachable.Contains(target))
         {
-            foreach (var d in devices.Where(d => d == wake.DeviceSerial!.Trim() && !unreachable.Contains(d)).ToList())
+            var computerLocked = cfg.Get().Display.FollowComputerLock && ComputerLocked();
+            if (!computerLocked)
             {
-                try { await WakePhoneAsync(adb, d, ct); }
+                try { await WakePhoneAsync(adb, target, ct); }
                 catch (Exception ex) when (ex is IOException or TimeoutException)
                 {
-                    log.LogWarning("{Device}: could not check the phone's screen for wake-up ({Message})", d, ex.Message);
-                    unreachable.Add(d);
+                    log.LogWarning("{Device}: could not check the phone's screen for wake-up ({Message})", target, ex.Message);
+                    unreachable.Add(target);
                 }
             }
         }
-        Report($"phone connected: {Devices}");
+        Report(devices.Length > 0 ? $"phone connected: {Devices}" : $"waking phone: {wakeSerial}");
     }
 
     /// <summary>
@@ -306,25 +320,48 @@ public sealed class AdbReverse(ConfigStore cfg, ILogger<AdbReverse> log, AgentEn
     /// </summary>
     internal async Task WakePhoneAsync(string adb, string device, CancellationToken ct)
     {
-        var screenOff = (await Adb(adb, $"-s {device} shell dumpsys power", ct, anyExit: true))
-            .Contains("Display Power: state=OFF");
-        var activity = LastResumedActivity(await Adb(adb, $"-s {device} shell dumpsys activity activities", ct, anyExit: true));
+        var power = PowerState(await Adb(adb, ["-s", device, "shell", "dumpsys", "power"], ct, anyExit: true));
+        if (power is null)
+        {
+            log.LogDebug("{Device}: not waking: the screen state could not be read", device);
+            return; // the feature contract: no input on a failed screen query
+        }
+        var activity = LastResumedActivity(await Adb(adb, ["-s", device, "shell", "dumpsys", "activity", "activities"], ct, anyExit: true));
         if (activity is null || !activity.StartsWith(PanelPackage, StringComparison.Ordinal))
         {
             log.LogDebug("{Device}: not waking: PhoneBox is not on the screen ({Activity})", device, activity ?? "unknown");
             return;
         }
-        if (screenOff)
+        if (power == "OFF")
         {
-            await Adb(adb, $"-s {device} shell input keyevent 224", ct); // KEYCODE_WAKEUP
+            await Adb(adb, ["-s", device, "shell", "input", "keyevent", "224"], ct); // KEYCODE_WAKEUP
             await SwipeUpAsync(adb, device, ct);
             log.LogInformation("{Device}: phone woken and unlocked into PhoneBox", device);
             return;
         }
-        var focus = CurrentFocusActivity(await Adb(adb, $"-s {device} shell dumpsys window", ct, anyExit: true));
-        if (focus is null || focus.StartsWith(PanelPackage, StringComparison.Ordinal)) return; // already open (or unreadable)
+        var focus = CurrentFocusWindow(await Adb(adb, ["-s", device, "shell", "dumpsys", "window"], ct, anyExit: true));
+        if (focus is null) return; // unreadable focus line: leave the screen as it is
+        if (focus == NoFocus) return; // nothing on screen: leave it
+        if (focus.StartsWith(PanelPackage, StringComparison.Ordinal)) return; // PhoneBox is already on screen
+        // the keyguard (on Android 14 the component-less "NotificationShade" window) or another window covers
+        // PhoneBox: swipe up to reveal the panel.
         await SwipeUpAsync(adb, device, ct);
         log.LogInformation("{Device}: phone unlocked into PhoneBox", device);
+    }
+
+    /// <summary>
+    /// The screen's power state from "dumpsys power" ("OFF"/"ON"), or null when the query reported no recognized
+    /// state: the wake must not act on a screen it could not read.
+    /// </summary>
+    internal static string? PowerState(string dumpsysPower)
+    {
+        foreach (var line in dumpsysPower.Split('\n'))
+        {
+            if (!line.Contains("Display Power: state=", StringComparison.Ordinal)) continue;
+            var token = line[(line.IndexOf("Display Power: state=", StringComparison.Ordinal) + "Display Power: state=".Length)..].Trim();
+            return token is "OFF" or "ON" ? token : null;
+        }
+        return null;
     }
 
     /// <summary>
@@ -334,27 +371,37 @@ public sealed class AdbReverse(ConfigStore cfg, ILogger<AdbReverse> log, AgentEn
     /// </summary>
     internal static async Task SwipeUpAsync(string adb, string device, CancellationToken ct)
     {
-        var size = (await Adb(adb, $"-s {device} shell wm size", ct, anyExit: true))
-            .Split('\n')
-            .Select(l => l.Replace("Physical size: ", "", StringComparison.Ordinal).Trim())
-            .FirstOrDefault(l => l.Contains('x')) ?? "";
-        var parts = size.Split('x', StringSplitOptions.TrimEntries);
+        // "wm size" reports the physical size and, when an override is active, the override size after it; the
+        // gesture must use the effective (override) size, so prefer it.
+        var lines = (await Adb(adb, ["-s", device, "shell", "wm", "size"], ct, anyExit: true)).Split('\n').Select(l => l.Trim()).ToArray();
+        var size = lines.FirstOrDefault(l => l.StartsWith("Override size:", StringComparison.Ordinal))
+            ?? lines.FirstOrDefault(l => l.StartsWith("Physical size:", StringComparison.Ordinal))
+            ?? lines.FirstOrDefault(l => l.Contains('x')) ?? "";
+        var parts = size.Split(':', StringSplitOptions.TrimEntries) is { Length: > 1 } p ? p[^1].Split('x', StringSplitOptions.TrimEntries) : size.Split('x', StringSplitOptions.TrimEntries);
         if (parts.Length < 2 || !int.TryParse(parts[0], out var width) || !int.TryParse(parts[1], out var height) || width <= 0 || height <= 0)
             throw new IOException($"could not read the screen size of {device}");
         var x = width / 2;
         var bottom = (int)(height * 0.85);
         var top = height / 2;
-        await Adb(adb, $"-s {device} shell input swipe {x} {bottom} {x} {top} 400", ct);
+        await Adb(adb, ["-s", device, "shell", "input", "swipe", x.ToString(), bottom.ToString(), x.ToString(), top.ToString(), "400"], ct);
     }
 
-    /// <summary>The activity currently on screen from "dumpsys window" ("mCurrentFocus"), or null.</summary>
-    internal static string? CurrentFocusActivity(string dumpsysWindow)
+    /// <summary>No focused window ("mCurrentFocus=null").</summary>
+    internal const string NoFocus = "no focus";
+
+    /// <summary>
+    /// The window currently on screen from "dumpsys window" ("mCurrentFocus"): its activity component, the
+    /// keyguard's component-less window name on Android 14 ("NotificationShade"), <see cref="NoFocus"/> for
+    /// "mCurrentFocus=null", or null when the line is absent (the dump was unreadable).
+    /// </summary>
+    internal static string? CurrentFocusWindow(string dumpsysWindow)
     {
         foreach (var line in dumpsysWindow.Split('\n'))
         {
             if (!line.Contains("mCurrentFocus", StringComparison.Ordinal)) continue;
             var m = System.Text.RegularExpressions.Regex.Match(line, @"\s([\w.]+/[\w.$]+)");
-            return m.Success ? m.Groups[1].Value : null;
+            if (m.Success) return m.Groups[1].Value;
+            return line.Contains("NotificationShade", StringComparison.Ordinal) ? "NotificationShade" : NoFocus;
         }
         return null;
     }
@@ -451,6 +498,22 @@ public sealed class AdbReverse(ConfigStore cfg, ILogger<AdbReverse> log, AgentEn
             RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
             WorkingDirectory = AppPaths.NeutralCwd,
         };
+        var result = await ToolProcess.RunAsync(psi, TimeSpan.FromSeconds(8), ct);
+        if (result.ExitCode != 0 && !anyExit) throw new IOException($"ADB exited with code {result.ExitCode}");
+        return result.Output;
+    }
+
+    /// <summary>Like <see cref="Adb(string, string, CancellationToken, bool)"/>, with each argument passed separately
+    /// through <see cref="ProcessStartInfo.ArgumentList"/> (no shell, no request text).</summary>
+    internal static async Task<string> Adb(string adb, IEnumerable<string> args, CancellationToken ct, bool anyExit = false)
+    {
+        if (SessionEnding) throw new OperationCanceledException("the session is ending");
+        var psi = new ProcessStartInfo(adb)
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
+            WorkingDirectory = AppPaths.NeutralCwd,
+        };
+        foreach (var a in args) psi.ArgumentList.Add(a);
         var result = await ToolProcess.RunAsync(psi, TimeSpan.FromSeconds(8), ct);
         if (result.ExitCode != 0 && !anyExit) throw new IOException($"ADB exited with code {result.ExitCode}");
         return result.Output;
