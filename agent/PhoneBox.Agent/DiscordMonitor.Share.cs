@@ -199,7 +199,21 @@ public sealed partial class DiscordMonitor
                 if (sharing) return new("sharing", "you are already sharing");
                 if (action == "app" && !listed) return new("gone", "this app is not in the list");
             }
-            try { await Request("TOGGLE_SCREENSHARE", action == "app" ? new JsonObject { ["pid"] = pid } : new JsonObject(), null, CancellationToken.None); }
+            try
+            {
+                // checked again once the pipe is free: a share started or stopped on the computer meanwhile would be undone
+                await Request("TOGGLE_SCREENSHARE", action == "app" ? new JsonObject { ["pid"] = pid } : new JsonObject(), null, CancellationToken.None,
+                    stillValid: () => Sharing == sharing);
+            }
+            catch (StaleRequestException)
+            {
+                return Sharing switch
+                {
+                    false when action == "stop" => null, // it has ended, as asked
+                    true => new("sharing", "you are already sharing"),
+                    _ => new("unknown", "Discord has not said yet whether you are sharing"),
+                };
+            }
             catch (TimeoutException)
             {
                 // it may or may not have been done: ask Discord for the state again before anything else is sent

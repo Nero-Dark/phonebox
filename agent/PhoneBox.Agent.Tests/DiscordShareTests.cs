@@ -458,6 +458,25 @@ public sealed class DiscordShareTests : IDisposable
         });
     }
 
+    // A share stopped on the computer while the phone's Stop waited for the pipe: the toggle would start it again.
+    [Fact]
+    public async Task A_stop_that_waited_for_the_pipe_sends_nothing_once_the_share_has_ended()
+    {
+        var monitor = Monitor(share: true);
+        await WithShare(monitor, Active, async discord =>
+        {
+            await monitor._send.WaitAsync();          // another request is being written
+            var stop = monitor.ShareActAsync("stop", null); // has seen the share and waits for the pipe
+            await discord.State(Idle);                // stopped on the computer meanwhile
+            await Until(() => monitor.Sharing == false);
+            monitor._send.Release();
+            Assert.Null(await stop);                  // it has ended, as asked
+            var sent = discord.Request("TOGGLE_SCREENSHARE");
+            await Task.Delay(150);
+            Assert.False(sent.IsCompleted);
+        });
+    }
+
     [Fact]
     public async Task The_picker_leaves_the_state_as_it_was()
     {

@@ -40,7 +40,7 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
     private readonly object _lock = new();
     private readonly List<DiscordNotification> _notes = [];
     internal readonly ConcurrentDictionary<string, TaskCompletionSource<JsonNode?>> _pending = new(); // internal for tests
-    private readonly SemaphoreSlim _send = new(1, 1);
+    internal readonly SemaphoreSlim _send = new(1, 1); // internal for tests
     internal Stream? _io; // internal for tests
 
     private static DiscordSnapshot Empty(string? error) => new(false, error, null, false, false, null, null, null, [], [], []);
@@ -638,7 +638,10 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
         }
     }
 
-    private async Task<JsonNode?> Request(string cmd, JsonObject? args, string? evt, CancellationToken ct, TimeSpan? wait = null)
+    /// <summary>Thrown by <see cref="Request"/> when <c>stillValid</c> says no once the send lock is held: nothing was sent.</summary>
+    private sealed class StaleRequestException() : Exception("the state changed before the request was sent");
+
+    private async Task<JsonNode?> Request(string cmd, JsonObject? args, string? evt, CancellationToken ct, TimeSpan? wait = null, Func<bool>? stillValid = null)
     {
         var io = _io ?? throw new Exception("Discord is not connected");
         var id = Guid.NewGuid().ToString("N");
@@ -653,7 +656,13 @@ public sealed partial class DiscordMonitor(ConfigStore config, ILogger<DiscordMo
         try
         {
             await _send.WaitAsync(timeout.Token);
-            try { await WriteFrame(io, 1, msg, timeout.Token); } finally { _send.Release(); }
+            try
+            {
+                // what the caller decided on may have changed while it waited for the lock (a toggle would undo it)
+                if (stillValid?.Invoke() == false) throw new StaleRequestException();
+                await WriteFrame(io, 1, msg, timeout.Token);
+            }
+            finally { _send.Release(); }
             return await tcs.Task;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new TimeoutException("Discord did not answer"); }
