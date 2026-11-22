@@ -844,6 +844,14 @@ nav a.on::before { color: var(--accent); }
         <p id="webviewProblem" hidden style="margin:10px 0 0;font-size:13px;color:var(--warn)"></p>
       </div>
       <div class="card">
+        <h3 data-i18n="s.wake.title">Wake the phone</h3>
+        <div class="row" style="margin-bottom:8px"><label class="switch"><input type="checkbox" data-bind="adbWake.enabled"><span></span></label> <span data-i18n="s.wake.enable">Wake the phone and swipe it open</span></div>
+        <div class="grid2">
+          <div class="field"><label data-i18n="s.wake.phoneToUse">Phone to wake</label><select id="wakeSerial"></select><span class="hint" data-i18n="s.wake.phoneToUseHint">Choose the phone to wake and unlock. Nothing chosen = the feature does nothing.</span></div>
+        </div>
+        <p class="hint" data-i18n="s.wake.hint" style="margin:8px 0 0">When the screen is off the agent sends a wake key and swipes up; a locked screen is unlocked the same way. The phone must show PhoneBox on screen, and a PIN, pattern, or password is never forced open.</p>
+      </div>
+      <div class="card">
         <h3 data-i18n="s.phones.title">Phones</h3>
         <p class="hint" style="margin:0 0 12px" data-i18n="s.phones.lead">Several phones (or a phone and a tablet) can use this computer at once, over USB or Wi-Fi. Give each one a name and choose the pages it shows; a phone shows all pages until you choose.</p>
         <div id="phoneList"><p class="hint" data-i18n="s.phones.empty">No phone has connected yet.</p></div>
@@ -3560,6 +3568,13 @@ async function loadInfo() {
     if (cur && !i.devices.includes(cur)) opts.push([cur, cur + ' (not connected)']);
     sel.replaceChildren(...opts.map(([v, l]) => h('option', { value: v, selected: v === cur }, l)));
     sel.onchange = () => { cfg.deviceSerial = sel.value || null; changed(); };
+    // the wake feature's own device choice: no "all" option — without a chosen phone it does nothing
+    const wakeSel = $('wakeSerial');
+    const wakeCur = cfg.adbWake?.deviceSerial || '';
+    const wakeOpts = [['', t('s.wake.choose')], ...i.devices.map((d) => [d, d])];
+    if (wakeCur && !i.devices.includes(wakeCur)) wakeOpts.push([wakeCur, wakeCur + ' (not connected)']);
+    wakeSel.replaceChildren(...wakeOpts.map(([v, l]) => h('option', { value: v, selected: v === wakeCur }, l)));
+    wakeSel.onchange = () => { cfg.adbWake.deviceSerial = wakeSel.value || null; changed(); };
     const lan = await (await fetch('/api/lan')).json();
     $('lanHosts').textContent = lan.hosts.length
       ? lan.hosts.map((a) => a.startsWith('100.') ? a + ' (Tailscale)' : a).join(', ')
@@ -3599,6 +3614,7 @@ function fillDefaults() {
     showSeconds: true, vibrate: true, finishToast: true, volumeKeys: true, artTint: true, nightWhenUnreachable: false, unreachableNightDelayMin: 5, proximityWake: true, orientation: 'landscape', theme: 'default', accent: '#2dd4bf' })) cfg.display[k] ??= v;
   cfg.charge ??= { enabled: false, min: 50, max: 80, method: 'ha' };
   cfg.steam ??= { enabled: false };
+  cfg.adbWake ??= { enabled: false, deviceSerial: null };
 }
 
 async function load() {

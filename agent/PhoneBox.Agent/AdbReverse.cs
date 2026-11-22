@@ -10,8 +10,9 @@ namespace PhoneBox.Agent;
 /// </summary>
 public sealed class AdbReverse(ConfigStore cfg, ILogger<AdbReverse> log, AgentEndpoint? endpoint = null, UsbLink? usb = null) : BackgroundService
 {
-    public const string PanelActivity = "net.oxog.phonebox.deskpanel/.MainActivity";
-    private const string HomeAlias = "net.oxog.phonebox.deskpanel/.HomeAlias";
+    public const string PanelPackage = "net.oxog.phonebox.deskpanel";
+    public const string PanelActivity = PanelPackage + "/.MainActivity";
+    private const string HomeAlias = PanelPackage + "/.HomeAlias";
     private readonly HashSet<string> _homeSet = [];
     private readonly HashSet<string> _awakeSet = [];
     private volatile string[] _missingApp = [];
@@ -246,6 +247,22 @@ public sealed class AdbReverse(ConfigStore cfg, ILogger<AdbReverse> log, AgentEn
             }
         }
         else _awakeSet.Clear();
+        // Settings › General › wake phone: the selected device's screen is polled, and when PhoneBox is the
+        // screen the phone is woken (KEYCODE_WAKEUP) and swiped open so it lands in the panel. A device whose
+        // screen query fails sits out the rest of this round; the next round tries it again.
+        var wake = cfg.Get().AdbWake;
+        if (wake.Enabled && !string.IsNullOrWhiteSpace(wake.DeviceSerial))
+        {
+            foreach (var d in devices.Where(d => d == wake.DeviceSerial!.Trim() && !unreachable.Contains(d)).ToList())
+            {
+                try { await WakePhoneAsync(adb, d, ct); }
+                catch (Exception ex) when (ex is IOException or TimeoutException)
+                {
+                    log.LogWarning("{Device}: could not check the phone's screen for wake-up ({Message})", d, ex.Message);
+                    unreachable.Add(d);
+                }
+            }
+        }
         Report($"phone connected: {Devices}");
     }
 
@@ -278,6 +295,81 @@ public sealed class AdbReverse(ConfigStore cfg, ILogger<AdbReverse> log, AgentEn
 
     private bool KeyAskedRecently(string d, long window) =>
         _keyTriedAt.TryGetValue(d, out var at) && Environment.TickCount64 - at < window;
+
+    /// <summary>
+    /// Wakes the phone's screen (KEYCODE_WAKEUP) and swipes it up so the keyguard opens into PhoneBox. The phone
+    /// must already show PhoneBox: its last resumed activity must be PhoneBox's (the keyguard is a window over
+    /// it, not an activity, so it is what is really "on screen"). With the screen off the phone is woken first;
+    /// with the screen on, a swipe is sent only when the current focus is not PhoneBox itself (the keyguard is
+    /// on top of it). A lock screen with a PIN, pattern, or password is not forced open — the swipe does not
+    /// pass it, and the user unlocks by hand.
+    /// </summary>
+    internal async Task WakePhoneAsync(string adb, string device, CancellationToken ct)
+    {
+        var screenOff = (await Adb(adb, $"-s {device} shell dumpsys power", ct, anyExit: true))
+            .Contains("Display Power: state=OFF");
+        var activity = LastResumedActivity(await Adb(adb, $"-s {device} shell dumpsys activity activities", ct, anyExit: true));
+        if (activity is null || !activity.StartsWith(PanelPackage, StringComparison.Ordinal))
+        {
+            log.LogDebug("{Device}: not waking: PhoneBox is not on the screen ({Activity})", device, activity ?? "unknown");
+            return;
+        }
+        if (screenOff)
+        {
+            await Adb(adb, $"-s {device} shell input keyevent 224", ct); // KEYCODE_WAKEUP
+            await SwipeUpAsync(adb, device, ct);
+            log.LogInformation("{Device}: phone woken and unlocked into PhoneBox", device);
+            return;
+        }
+        var focus = CurrentFocusActivity(await Adb(adb, $"-s {device} shell dumpsys window", ct, anyExit: true));
+        if (focus is null || focus.StartsWith(PanelPackage, StringComparison.Ordinal)) return; // already open (or unreadable)
+        await SwipeUpAsync(adb, device, ct);
+        log.LogInformation("{Device}: phone unlocked into PhoneBox", device);
+    }
+
+    /// <summary>
+    /// Swipes up the middle of the screen from about its lower third to about its middle (400 ms): the standard
+    /// gesture that dismisses the keyguard and the home screen. The coordinates come from the screen size, so
+    /// any resolution works.
+    /// </summary>
+    internal static async Task SwipeUpAsync(string adb, string device, CancellationToken ct)
+    {
+        var size = (await Adb(adb, $"-s {device} shell wm size", ct, anyExit: true))
+            .Split('\n')
+            .Select(l => l.Replace("Physical size: ", "", StringComparison.Ordinal).Trim())
+            .FirstOrDefault(l => l.Contains('x')) ?? "";
+        var parts = size.Split('x', StringSplitOptions.TrimEntries);
+        if (parts.Length < 2 || !int.TryParse(parts[0], out var width) || !int.TryParse(parts[1], out var height) || width <= 0 || height <= 0)
+            throw new IOException($"could not read the screen size of {device}");
+        var x = width / 2;
+        var bottom = (int)(height * 0.85);
+        var top = height / 2;
+        await Adb(adb, $"-s {device} shell input swipe {x} {bottom} {x} {top} 400", ct);
+    }
+
+    /// <summary>The activity currently on screen from "dumpsys window" ("mCurrentFocus"), or null.</summary>
+    internal static string? CurrentFocusActivity(string dumpsysWindow)
+    {
+        foreach (var line in dumpsysWindow.Split('\n'))
+        {
+            if (!line.Contains("mCurrentFocus", StringComparison.Ordinal)) continue;
+            var m = System.Text.RegularExpressions.Regex.Match(line, @"\s([\w.]+/[\w.$]+)");
+            return m.Success ? m.Groups[1].Value : null;
+        }
+        return null;
+    }
+
+    /// <summary>The last resumed activity from "dumpsys activity activities", or null (with the screen off the focus says nothing).</summary>
+    internal static string? LastResumedActivity(string dumpsysActivities)
+    {
+        foreach (var line in dumpsysActivities.Split('\n'))
+        {
+            if (!line.Contains("ResumedActivity", StringComparison.Ordinal)) continue;
+            var m = System.Text.RegularExpressions.Regex.Match(line, @"\s([\w.]+/[\w.$]+)");
+            return m.Success ? m.Groups[1].Value : null;
+        }
+        return null;
+    }
 
     /// <summary>True when "reverse --list" has any rule for the phone's tcp:8765, whatever it points at.</summary>
     internal static bool HasAnyRule(string list) => list.Split('\n')

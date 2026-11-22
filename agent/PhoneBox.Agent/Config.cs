@@ -26,6 +26,8 @@ public sealed class AgentConfig
     /// <summary>OpenCode prompts and sessions on the phone; everything is off until the settings page turns it on.</summary>
     [JsonPropertyName("opencode")]
     public OpenCodeConfig OpenCode { get; set; } = new();
+    /// <summary>Wake and unlock the phone over ADB (its own device selector; off by default).</summary>
+    public AdbWakeConfig AdbWake { get; set; } = new();
     public List<PageConfig> Pages { get; set; } = [];
     public List<Shortcut> Shortcuts { get; set; } = [];
     public List<RuleConfig> Rules { get; set; } = [];
@@ -224,6 +226,22 @@ public sealed class DisplayConfig
     public int MinDwellSec { get; set; } = 15;
     /// <summary>A rule keeps its page at most this many minutes, then the idle return may take over; 0 = as long as the rule lasts.</summary>
     public int HoldMaxMin { get; set; } = 30;
+}
+
+/// <summary>
+/// Wake the paired phone over ADB and swipe it open: when its screen is off the agent sends
+/// KEYCODE_WAKEUP, then swipes up so the phone lands in PhoneBox; a screen that is already on
+/// but locked only gets the swipe. Off by default, and it acts only on the selected device.
+/// </summary>
+public sealed class AdbWakeConfig
+{
+    /// <summary>Turn the feature on. Default false — the phone stays asleep until you ask for it.</summary>
+    public bool Enabled { get; set; } = false;
+    /// <summary>
+    /// The ADB device serial to wake and unlock (one of the serials <c>adb devices</c> lists).
+    /// Required: with nothing selected the feature does not act.
+    /// </summary>
+    public string? DeviceSerial { get; set; }
 }
 
 public sealed class LanConfig
@@ -662,6 +680,8 @@ public sealed partial class ConfigStore(string path)
         c.OpenCode ??= new();
         c.OpenCode.TimeoutSec = Math.Clamp(c.OpenCode.TimeoutSec, 10, 3600);
         c.OpenCode.AlwaysCountdownSec = Math.Clamp(c.OpenCode.AlwaysCountdownSec, 0, 60);
+        c.AdbWake ??= new();
+        c.AdbWake.DeviceSerial = c.AdbWake.DeviceSerial?.Trim();
         if (string.IsNullOrWhiteSpace(c.Updates.Repo)) c.Updates.Repo = "ersinkoc/phonebox";
         c.Lan.Port = Math.Clamp(c.Lan.Port, 1024, 65535);
         if (string.IsNullOrWhiteSpace(c.Lan.Token)) c.Lan.Token = NewToken();
