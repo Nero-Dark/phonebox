@@ -24,10 +24,11 @@
   only to your Plex server. The widget's requests are made only while an enabled page shows it; **Check Plex
   connection** sends one check each time you press it (#379, #409, [snachodog](https://github.com/snachodog)).
 - Discord: start and stop a screen share from the phone. The widget's share view lists the apps with a window on the
-  computer (names only), or opens Discord's own picker there, and stops the share. It has its own setting in
-  **Settings › General › Discord** (**Start and stop Discord screen shares from the phone**), off by default, and
-  needs a Discord widget with **Control** on an enabled page. Discord asks to approve PhoneBox again for the
-  screen-share permission; declining it turns off only screen share (#356, #370, [AlberBM](https://github.com/AlberBM)).
+  computer (names only, on Windows; elsewhere use the picker), or opens Discord's own picker there, and stops the
+  share. It has its own setting in **Settings › General › Discord** (**Start and stop Discord screen shares from the
+  phone**), off by default, and needs a Discord widget with **Control** on an enabled page. Discord asks to approve
+  PhoneBox again for the screen-share permission; declining it turns off only screen share (#356, #370,
+  [AlberBM](https://github.com/AlberBM)).
 
 **Agent**
 - Phone app updates: a phone that cannot take a streamed install (`splice failed: EINVAL`, seen with Android 15 on a

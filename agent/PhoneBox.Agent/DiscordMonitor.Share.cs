@@ -203,10 +203,11 @@ public sealed partial class DiscordMonitor
             {
                 // checked again once the pipe is free: a share started or stopped on the computer meanwhile would be undone
                 await Request("TOGGLE_SCREENSHARE", action == "app" ? new JsonObject { ["pid"] = pid } : new JsonObject(), null, CancellationToken.None,
-                    stillValid: () => Sharing == sharing);
+                    stillValid: () => Refusal() is null && Sharing == sharing);
             }
             catch (StaleRequestException)
             {
+                if (Refusal() is { } refused) return refused; // control or screen share turned off meanwhile
                 return Sharing switch
                 {
                     false when action == "stop" => null, // it has ended, as asked

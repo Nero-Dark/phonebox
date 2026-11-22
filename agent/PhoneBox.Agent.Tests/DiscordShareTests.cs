@@ -478,6 +478,23 @@ public sealed class DiscordShareTests : IDisposable
     }
 
     [Fact]
+    public async Task A_pick_that_waited_for_the_pipe_sends_nothing_once_control_is_off()
+    {
+        var monitor = Monitor(share: true);
+        await WithShare(monitor, Idle, async discord =>
+        {
+            await monitor._send.WaitAsync();
+            var pick = monitor.ShareActAsync("pick", null);
+            Store(share: true, control: false);       // the widget's Control turned off meanwhile
+            monitor._send.Release();
+            Assert.Equal("control", Code(await pick));
+            var sent = discord.Request("TOGGLE_SCREENSHARE");
+            await Task.Delay(150);
+            Assert.False(sent.IsCompleted);
+        });
+    }
+
+    [Fact]
     public async Task The_picker_leaves_the_state_as_it_was()
     {
         var monitor = Monitor(share: true);
