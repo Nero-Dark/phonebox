@@ -841,7 +841,7 @@ nav a.on::before { color: var(--accent); }
           <div class="field"><label data-i18n="s.conn.adbPath">Path to adb.exe (empty = auto-detect)</label><input type="text" data-bind="adbPath" placeholder="auto-detected"><span class="hint" id="adbFound"></span></div>
         </div>
         <div class="row" style="margin-top:12px"><label class="switch"><input type="checkbox" data-bind="adbWake.enabled" aria-labelledby="wakeEnableLabel"><span></span></label> <span id="wakeEnableLabel" data-i18n="s.wake.enable">Wake the phone and swipe it open</span></div>
-        <p class="hint" data-i18n="s.wake.hint" style="margin:8px 0 0">When the screen is off the agent sends a wake key and swipes up; a locked screen is unlocked the same way. The phone must show PhoneBox on screen, and a PIN, pattern, or password is never forced open.</p>
+        <p class="hint" data-i18n="s.wake.hint" style="margin:8px 0 0">Wakes the phone chosen in the Phone connection card. When the screen is off the agent sends a wake key and swipes up. The phone must show PhoneBox on screen, and its lock screen must not require a PIN, pattern, or password — a swipe cannot get past a locked screen like that.</p>
         <p id="usbProblem" hidden style="margin:10px 0 0;font-size:13px;color:var(--warn)"></p>
         <p id="webviewProblem" hidden style="margin:10px 0 0;font-size:13px;color:var(--warn)"></p>
       </div>
