@@ -231,17 +231,13 @@ public sealed class DisplayConfig
 /// <summary>
 /// Wake the paired phone over ADB and swipe it open: when its screen is off the agent sends
 /// KEYCODE_WAKEUP, then swipes up so the phone lands in PhoneBox; a screen that is already on
-/// but locked only gets the swipe. Off by default, and it acts only on the selected device.
+/// but locked only gets the swipe. It always acts on the phone chosen in the Phone connection
+/// card. Off by default.
 /// </summary>
 public sealed class AdbWakeConfig
 {
     /// <summary>Turn the feature on. Default false — the phone stays asleep until you ask for it.</summary>
     public bool Enabled { get; set; } = false;
-    /// <summary>
-    /// The ADB device serial to wake and unlock (one of the serials <c>adb devices</c> lists).
-    /// Required: with nothing selected the feature does not act.
-    /// </summary>
-    public string? DeviceSerial { get; set; }
 }
 
 public sealed class LanConfig
@@ -681,7 +677,6 @@ public sealed partial class ConfigStore(string path)
         c.OpenCode.TimeoutSec = Math.Clamp(c.OpenCode.TimeoutSec, 10, 3600);
         c.OpenCode.AlwaysCountdownSec = Math.Clamp(c.OpenCode.AlwaysCountdownSec, 0, 60);
         c.AdbWake ??= new();
-        c.AdbWake.DeviceSerial = c.AdbWake.DeviceSerial?.Trim();
         if (string.IsNullOrWhiteSpace(c.Updates.Repo)) c.Updates.Repo = "ersinkoc/phonebox";
         c.Lan.Port = Math.Clamp(c.Lan.Port, 1024, 65535);
         if (string.IsNullOrWhiteSpace(c.Lan.Token)) c.Lan.Token = NewToken();

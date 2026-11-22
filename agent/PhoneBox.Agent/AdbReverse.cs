@@ -151,10 +151,9 @@ public sealed class AdbReverse(ConfigStore cfg, ILogger<AdbReverse> log, AgentEn
             if (problem is null && devices.Length > 0) log.LogInformation("USB: the phone is back on USB");
         }
         _missingApp = _missingApp.Where(devices.Contains).ToArray();
-        // Settings › General › wake phone: its target is one of the attached phones, chosen independently of the
-        // panel phone selector, so it is checked even when no panel phone is attached.
-        var wakeSerial = cfg.Get().AdbWake.DeviceSerial?.Trim();
-        var wakeWanted = cfg.Get().AdbWake.Enabled && wakeSerial is { Length: > 0 } && _all.Contains(wakeSerial);
+        // Settings › General › wake the phone: it wakes the phone the panel runs on — the one chosen in the
+        // Phone connection card — so it is checked even when that phone is the only one attached.
+        var wakeWanted = cfg.Get().AdbWake.Enabled && serial is { Length: > 0 };
         if (devices.Length == 0 && !wakeWanted) { Report("no phone connected, waiting..."); return; }
 
         // A phone that did not answer "reverse --list" sits out the rest of this round (home screen, keep awake): one
@@ -258,13 +257,13 @@ public sealed class AdbReverse(ConfigStore cfg, ILogger<AdbReverse> log, AgentEn
             }
         }
         else _awakeSet.Clear();
-        // Settings › General › wake phone: the selected device's screen is polled, and when PhoneBox is the
-        // screen the phone is woken (KEYCODE_WAKEUP) and swiped open so it lands in the panel. A device whose
-        // screen query fails sits out the rest of this round; the next round tries it again. The wake phone is
-        // chosen independently of the panel phone, so it is looked up in the full attached-device list, not the
-        // filtered one. It is never woken while the computer is locked with Settings › Display › follow the
-        // computer lock: the lock sync put the phone to sleep on purpose, and the unlock path wakes and opens it.
-        if (wakeWanted && wakeSerial is { } target && !unreachable.Contains(target))
+        // Settings › General › wake the phone: it wakes the phone the panel runs on — the one chosen in the
+        // Phone connection card. Its screen is polled, and when PhoneBox is the screen the phone is woken
+        // (KEYCODE_WAKEUP) and swiped open so it lands in the panel. A device whose screen query fails sits out
+        // the rest of this round; the next round tries it again. It is never woken while the computer is locked
+        // with Settings › Display › follow the computer lock: the lock sync put the phone to sleep on purpose,
+        // and the unlock path wakes and opens it.
+        if (wakeWanted && serial is { } target && _all.Contains(target) && !unreachable.Contains(target))
         {
             var computerLocked = cfg.Get().Display.FollowComputerLock && ComputerLocked();
             if (!computerLocked)
@@ -277,7 +276,7 @@ public sealed class AdbReverse(ConfigStore cfg, ILogger<AdbReverse> log, AgentEn
                 }
             }
         }
-        Report(devices.Length > 0 ? $"phone connected: {Devices}" : $"waking phone: {wakeSerial}");
+        Report(devices.Length > 0 ? $"phone connected: {Devices}" : wakeWanted ? $"waking phone: {serial}" : "no phone connected, waiting...");
     }
 
     /// <summary>

@@ -6,9 +6,9 @@ using Xunit;
 /// <summary>
 /// The wake-and-unlock feature (against a fake adb that logs its calls; never the real adb or a phone):
 /// a phone whose last resumed activity is PhoneBox is woken (KEYCODE_WAKEUP) and swiped up; one showing
-/// anything else is left alone; a screen that is already on and locked only gets the swipe. The wake phone
-/// is chosen from the full attached list (independently of the panel phone), is never woken while the
-/// computer is locked, and a screen whose state cannot be read is not touched.
+/// anything else is left alone; a screen that is already on and locked only gets the swipe. The wake target
+/// is the phone chosen in the Phone connection card (the panel phone), it is never woken while the computer
+/// is locked, and a screen whose state cannot be read is not touched.
 /// </summary>
 [Collection("adb session")] // SessionEndingTests flips the static session-ending window
 public sealed class AdbWakeTests : IDisposable
@@ -83,7 +83,7 @@ public sealed class AdbWakeTests : IDisposable
     private AdbReverse Adb()
     {
         var path = Path.Combine(_dir, "config.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(new { adbPath = FakeAdb(power: "OFF", resumed: "x", focus: "x"), adbWake = new { enabled = true, deviceSerial = "FAKE1" } }));
+        File.WriteAllText(path, JsonSerializer.Serialize(new { adbPath = FakeAdb(power: "OFF", resumed: "x", focus: "x"), adbWake = new { enabled = true } }));
         var store = new ConfigStore(path);
         return new AdbReverse(store, NullLogger<AdbReverse>.Instance);
     }
@@ -223,13 +223,13 @@ public sealed class AdbWakeTests : IDisposable
     }
 
     [Fact]
-    public async Task TheWakePhoneIsWokenEvenWhenThePanelPhoneIsSomewhereElse()
+    public async Task TheWakeFollowsThePanelPhone()
     {
-        // FAKE2 is attached and is the wake phone, but the panel phone selector points at FAKE1: the wake target
-        // is looked up in the full attached list, so FAKE2 is woken even though no panel phone is attached.
+        // FAKE2 is attached and is the phone chosen in the Phone connection card: the wake target is that phone,
+        // so FAKE2 is woken and nothing else is touched.
         var path = Path.Combine(_dir, "config.json");
         var fake = FakeAdb(power: "OFF", resumed: "net.oxog.phonebox.deskpanel/.MainActivity", focus: "com.android.launcher/.UxLauncher", device: "FAKE2");
-        File.WriteAllText(path, JsonSerializer.Serialize(new { adbPath = fake, deviceSerial = "FAKE1", adbWake = new { enabled = true, deviceSerial = "FAKE2" } }));
+        File.WriteAllText(path, JsonSerializer.Serialize(new { adbPath = fake, deviceSerial = "FAKE2", adbWake = new { enabled = true } }));
         var store = new ConfigStore(path);
         using var adb = new AdbReverse(store, NullLogger<AdbReverse>.Instance);
         var error = await Record.ExceptionAsync(() => Pass(adb));
@@ -237,8 +237,25 @@ public sealed class AdbWakeTests : IDisposable
         var calls = Calls();
         var key = calls.ToList().FindIndex(c => c == "-s FAKE2 shell input keyevent 224");
         var swipe = calls.ToList().FindIndex(c => c == "-s FAKE2 shell input swipe 540 2040 540 1200 400");
-        Assert.True(key >= 0, $"the wake key was not sent to FAKE2: {string.Join(" | ", calls)}");
+        Assert.True(key >= 0, $"the wake key was not sent to the panel phone FAKE2: {string.Join(" | ", calls)}");
         Assert.True(swipe > key, $"the swipe was not sent after the wake key: {string.Join(" | ", calls)}");
+    }
+
+    [Fact]
+    public async Task APhoneThatIsNotThePanelPhoneIsNeverWoken()
+    {
+        // FAKE1 is attached but the panel phone is FAKE2 (not attached): the wake target is the panel phone, so
+        // FAKE1 — which is not the panel phone — is left alone even with wake enabled.
+        var path = Path.Combine(_dir, "config.json");
+        var fake = FakeAdb(power: "OFF", resumed: "net.oxog.phonebox.deskpanel/.MainActivity", focus: "com.android.launcher/.UxLauncher", device: "FAKE1");
+        File.WriteAllText(path, JsonSerializer.Serialize(new { adbPath = fake, deviceSerial = "FAKE2", adbWake = new { enabled = true } }));
+        var store = new ConfigStore(path);
+        using var adb = new AdbReverse(store, NullLogger<AdbReverse>.Instance);
+        var error = await Record.ExceptionAsync(() => Pass(adb));
+        Assert.True(error is null, $"the round failed: {error?.Message}");
+        var calls = Calls();
+        Assert.DoesNotContain(calls, c => c.Contains("keyevent 224", StringComparison.Ordinal));
+        Assert.DoesNotContain(calls, c => c.Contains("input swipe", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -246,7 +263,7 @@ public sealed class AdbWakeTests : IDisposable
     {
         var path = Path.Combine(_dir, "config.json");
         var fake = FakeAdb(power: "OFF", resumed: "net.oxog.phonebox.deskpanel/.MainActivity", focus: "com.android.launcher/.UxLauncher");
-        File.WriteAllText(path, JsonSerializer.Serialize(new { adbPath = fake, adbWake = new { enabled = true, deviceSerial = "FAKE1" }, display = new { followComputerLock = true } }));
+        File.WriteAllText(path, JsonSerializer.Serialize(new { adbPath = fake, deviceSerial = "FAKE1", adbWake = new { enabled = true }, display = new { followComputerLock = true } }));
         var store = new ConfigStore(path);
         using var adb = new AdbReverse(store, NullLogger<AdbReverse>.Instance);
         AdbReverse.ComputerLocked = () => true; // the computer's screen is locked (macOS console session)
