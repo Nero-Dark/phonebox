@@ -101,7 +101,8 @@ to the widget. While you are in a voice channel:
 - Turning it on asks Discord for `rpc.screenshare.read` and `rpc.screenshare.write`, so **Discord asks you to approve
   PhoneBox again** (the widget waits for your answer; an approval that isn't answered times out after two minutes). If you decline,
   PhoneBox goes on with the permissions it had, or asks for the base ones when it had none, and only screen share stays
-  off. To be asked again, turn the setting off and on.
+  off. You are asked again when you turn the setting off and on, and once after the agent restarts; to stop being
+  asked, turn the setting off.
 - The commands and the permissions are not in Discord's public documentation, so a Discord update can change them. When
   Discord refuses them, only screen share is off.
 
