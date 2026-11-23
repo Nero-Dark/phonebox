@@ -318,6 +318,8 @@ window.PhoneBoxLocaleData = Object.assign(window.PhoneBoxLocaleData || {}, {
       "s.rules.add": "ルールを追加",
       "s.rules.pause1h": "すべてのルールを 1 時間一時停止",
       "s.general.lead": "天気、夜間モード、表示挙動、電話接続。",
+      "s.wake.enable": "スマホを起動してスワイプで開く",
+      "s.wake.hint": "Phone接続カードで選択したスマホを起動します。画面がオフのとき、エージェントが起動キーを送り、上へスワイプします。画面にPhoneBoxが表示されている必要があり、ロック画面にPIN、パターン、パスワードが設定されていない必要があります — そのようなロック画面はスワイプでは通り抜けられません。",
       "s.weather.title": "天気",
       "s.weather.searchCity": "都市を検索",
       "s.weather.searchPlaceholder": "例えば タリンやベルリン",

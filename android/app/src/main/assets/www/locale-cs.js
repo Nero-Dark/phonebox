@@ -318,6 +318,8 @@ window.PhoneBoxLocaleData = Object.assign(window.PhoneBoxLocaleData || {}, {
       "s.rules.add": "Přidání pravidla",
       "s.rules.pause1h": "Pozastavení všech pravidel na 1 hodinu",
       "s.general.lead": "Počasí, noční režim, chování displeje a připojení telefonu.",
+      "s.wake.enable": "Probudit telefon a otevřít přejetím",
+      "s.wake.hint": "Probudí telefon vybraný v kartě Připojení telefonu. Když je displej vypnutý, agent pošle klávesu pro probuzení a přejetím nahoru. Telefon musí zobrazovat PhoneBox na obrazovce a jeho obrazovka uzamčení nesmí vyžadovat PIN, vzor ani heslo — přejetím se přes takovou zamčenou obrazovku neprojde.",
       "s.weather.title": "Počasí",
       "s.weather.searchCity": "Hledat město",
       "s.weather.searchPlaceholder": "např. Tallinn, Berlín…",

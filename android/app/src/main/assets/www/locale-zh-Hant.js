@@ -318,6 +318,8 @@ window.PhoneBoxLocaleData = Object.assign(window.PhoneBoxLocaleData || {}, {
       "s.rules.add": "添加一個規則",
       "s.rules.pause1h": "暫停所有規則一小時",
       "s.general.lead": "天氣 、 夜間模式 、 顯示行為和電話連接 。",
+      "s.wake.enable": "喚醒手機並滑動解鎖",
+      "s.wake.hint": "喚醒在「手機連線」卡片中選取的手機。當螢幕關閉時，代理程式會送出喚醒鍵並向上滑動。手機螢幕必須顯示 PhoneBox，而且鎖定畫面不能要求 PIN、圖騰或密碼 — 滑動無法通過這樣的鎖定畫面。",
       "s.weather.title": "天氣",
       "s.weather.searchCity": "搜尋城市",
       "s.weather.searchPlaceholder": "例如塔林、柏林",

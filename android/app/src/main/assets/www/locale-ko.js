@@ -318,6 +318,8 @@ window.PhoneBoxLocaleData = Object.assign(window.PhoneBoxLocaleData || {}, {
       "s.rules.add": "규칙 추가",
       "s.rules.pause1h": "모든 규칙을 1시간 동안 일시 중지",
       "s.general.lead": "날씨, 나이트 모드, 디스플레이 동작 및 전화 연결.",
+      "s.wake.enable": "전화기 깨우고 스와이프로 열기",
+      "s.wake.hint": "전화 연결 카드에서 선택한 전화기를 깨웁니다. 화면이 꺼져 있으면 에이전트가 깨우기 키를 보내고 위로 스와이프합니다. 화면에 PhoneBox가 표시되어야 하고, 잠금 화면에 PIN, 패턴, 비밀번호가 설정되어 있으면 안 됩니다 — 스와이프로는 그런 잠금 화면을 넘을 수 없습니다.",
       "s.weather.title": "날씨",
       "s.weather.searchCity": "도시 검색",
       "s.weather.searchPlaceholder": "예를 들어 탈린, 베를린...",

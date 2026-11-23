@@ -318,6 +318,8 @@ window.PhoneBoxLocaleData = Object.assign(window.PhoneBoxLocaleData || {}, {
       "s.rules.add": "Tambahkan aturan",
       "s.rules.pause1h": "Tahan semua aturan selama 1 jam",
       "s.general.lead": "Cuaca, mode malam, perilaku layar dan koneksi telepon.",
+      "s.wake.enable": "Bangunkan HP dan geser untuk membuka",
+      "s.wake.hint": "Membangunkan HP yang dipilih di kartu Koneksi HP. Saat layar mati, agen mengirim tombol bangun dan menggeser ke atas. HP harus menampilkan PhoneBox di layar, dan layar kuncinya tidak boleh meminta PIN, pola, atau kata sandi — sebuah geser tidak dapat melewati layar terkunci seperti itu.",
       "s.weather.title": "Cuaca",
       "s.weather.searchCity": "Cari kota",
       "s.weather.searchPlaceholder": "e.g. Tallinn, Berlin…",
