@@ -8787,7 +8787,7 @@ window.PhoneBoxLocaleData = Object.assign(window.PhoneBoxLocaleData || {}, {
       "s.kiosk.keepAwake": "Utrzymanie telefonu w trybie budowania: wyłącz wygaszacz ekranu Android (rozpoczyna się na ładowarce) i utrzymuj ekran podczas podłączania (ustaw nad USB)",
       "s.kiosk.openOnConnect": "Otwórz PhoneBox, gdy telefon jest podłączony: obudzić telefon i przynieść panel z przodu, gdy łączy się przez USB (wyłącz, aby otworzyć go samodzielnie, dla telefonu, którego używasz również do testowania aplikacji)",
       "s.kiosk.followLock": "Postępuj zgodnie z blokadą komputera: wyłącz ekran telefonu, gdy macOS się zablokuje; obudzić go i otworzyć PhoneBox, gdy macOS odblokuje (wymagane ADB; odblokować telefony zabezpieczone PIN lub hasło ręcznie)",
-      "s.kiosk.wakeOnUnlock": "Obudź telefon i odblokuj go: gdy PhoneBox otwiera się przez USB, ekran blokady wymagający tylko przesunięcia palcem zostaje pokonany (kod PIN, wzór ani hasło nigdy nie są wpasowywane)",
+      "s.kiosk.wakeOnUnlock": "Obudź telefon i odblokuj go: gdy PhoneBox otwiera się przez USB, ekran blokady wymagający tylko przesunięcia palcem zostaje pokonany (kod PIN, wzór ani hasło nigdy nie są pokonywane)",
       "s.claude.shareConversation": "Pokaż konwersację na telefonie (stuknij sesję Claude Code, aby zobaczyć jej ostatnie wiadomości i kroki; są to twoje monity i odpowiedzi Claude, wysyłane tylko do telefonu)",
       "s.claude.onlyWhenAway": "Tylko wtedy, gdy jestem z dala od komputera (bez klawiatury lub myszy przez minutę)",
       "s.claude.shareSessionTitles": "Pokaż tytuły czatów Claude Code na telefonie (Claude Code często wyciąga je z pierwszego monitu)",
