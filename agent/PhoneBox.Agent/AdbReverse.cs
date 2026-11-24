@@ -288,13 +288,19 @@ public sealed class AdbReverse(ConfigStore cfg, ILogger<AdbReverse> log, AgentEn
         _keyTriedAt.TryGetValue(d, out var at) && Environment.TickCount64 - at < window;
 
     /// <summary>
-    /// True when the "dumpsys window" dump says a keyguard is on screen ("mShowingLockscreen=true" on older
-    /// Android, "isKeyguardShowing=true" on newer). A dump that says nothing reads false: the unlock is then
-    /// skipped, which is the safe direction — the phone is left as it is rather than acted on blindly.
+    /// True when a "dumpsys window" dump says a keyguard is on screen. Which flag says so depends on the build:
+    /// "mShowingLockscreen=true" (Android 11 and older), "isKeyguardShowing=true" (Android 12 and newer), or only
+    /// "showing=true" on devices whose window service prints neither — measured on a Redmi Note 7 (MIUI 12.5, Android
+    /// 10), which when locked printed just "showing=true", "showingAndNotOccluded=true", "secure=false" and
+    /// "mDreamingLockscreen=true", and when unlocked printed "showing=false". "showing=" is therefore compared as a
+    /// whole trimmed line, so MIUI's "showingAndNotOccluded=true", which is not a keyguard state, cannot match. A dump
+    /// that names no flag reads false: the unlock is then skipped, which is the safe direction, the phone being left as
+    /// it is rather than acted on blindly.
     /// </summary>
     internal static bool KeyguardShowing(string dumpsysWindow) =>
         dumpsysWindow.Contains("mShowingLockscreen=true", StringComparison.Ordinal) ||
-        dumpsysWindow.Contains("isKeyguardShowing=true", StringComparison.Ordinal);
+        dumpsysWindow.Contains("isKeyguardShowing=true", StringComparison.Ordinal) ||
+        dumpsysWindow.Split('\n').Any(line => line.Trim() == "showing=true");
 
     /// <summary>True when "reverse --list" has any rule for the phone's tcp:8765, whatever it points at.</summary>
     internal static bool HasAnyRule(string list) => list.Split('\n')
