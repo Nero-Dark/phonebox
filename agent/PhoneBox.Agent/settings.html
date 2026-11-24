@@ -754,6 +754,7 @@ nav a.on::before { color: var(--accent); }
         <label class="check"><input type="checkbox" data-bind="display.homeScreen"> <span data-i18n="s.kiosk.homeScreen">Use the panel as the phone's home screen: it starts after a reboot and Home returns to it (turn off to get your launcher back)</span></label>
         <label class="check"><input type="checkbox" data-bind="display.keepAwake"> <span data-i18n="s.kiosk.keepAwake">Keep the phone awake: turn off Android's screen saver (it starts on the charger) and keep the screen on while plugged in (set over USB)</span></label>
         <label class="check"><input type="checkbox" data-bind="display.openOnConnect"> <span data-i18n="s.kiosk.openOnConnect">Open PhoneBox when the phone is plugged in: wake the phone and bring the panel to the front whenever it connects over USB (turn off to open it yourself, for a phone you also use for app testing)</span></label>
+        <label class="check"><input type="checkbox" data-bind="display.wakeOnUnlock"> <span data-i18n="s.kiosk.wakeOnUnlock">Wake and unlock: when PhoneBox opens over USB, step over a swipe-only lock screen (a PIN, pattern or password is never passed)</span></label>
         <label class="check" id="followComputerLockOption" style="display:none"><input type="checkbox" data-bind="display.followComputerLock"> <span data-i18n="s.kiosk.followLock">Follow the computer lock: turn the phone screen off when macOS locks; wake it and open PhoneBox when macOS unlocks (ADB required; unlock phones secured by a PIN or password manually)</span></label>
       </div>
 
@@ -840,8 +841,6 @@ nav a.on::before { color: var(--accent); }
             <div class="row" id="appMissing" hidden style="margin-top:8px"><button class="btn primary sm" id="installApp" data-i18n="s.conn.installApp">Install the phone app</button><span class="hint" id="appMissingText"></span></div></div>
           <div class="field"><label data-i18n="s.conn.adbPath">Path to adb.exe (empty = auto-detect)</label><input type="text" data-bind="adbPath" placeholder="auto-detected"><span class="hint" id="adbFound"></span></div>
         </div>
-        <div class="row" style="margin-top:12px"><label class="switch"><input type="checkbox" data-bind="adbWake.enabled" aria-labelledby="wakeEnableLabel"><span></span></label> <span id="wakeEnableLabel" data-i18n="s.wake.enable">Wake the phone and swipe it open</span></div>
-        <p class="hint" data-i18n="s.wake.hint" style="margin:8px 0 0">Wakes the phone chosen in the Phone connection card. When the screen is off the agent sends a wake key and swipes up. The phone must show PhoneBox on screen, and its lock screen must not require a PIN, pattern, or password — a swipe cannot get past a locked screen like that.</p>
         <p id="usbProblem" hidden style="margin:10px 0 0;font-size:13px;color:var(--warn)"></p>
         <p id="webviewProblem" hidden style="margin:10px 0 0;font-size:13px;color:var(--warn)"></p>
       </div>
@@ -3601,7 +3600,6 @@ function fillDefaults() {
     showSeconds: true, vibrate: true, finishToast: true, volumeKeys: true, artTint: true, nightWhenUnreachable: false, unreachableNightDelayMin: 5, proximityWake: true, orientation: 'landscape', theme: 'default', accent: '#2dd4bf' })) cfg.display[k] ??= v;
   cfg.charge ??= { enabled: false, min: 50, max: 80, method: 'ha' };
   cfg.steam ??= { enabled: false };
-  cfg.adbWake ??= { enabled: false };
 }
 
 async function load() {
@@ -3653,7 +3651,7 @@ async function doSave() {
 }
 
 $('save').onclick = save;
-$('revert').onclick = () => { cfg = JSON.parse(saved); renderPages(); renderDeck(); renderRules(); renderCalendars(); renderFeeds(); renderCameras(); renderConsole(); renderNetAdapters(); renderPhones(); renderCharge(); bindForm(); loadInfo(); changed(); };
+$('revert').onclick = () => { cfg = JSON.parse(saved); renderPages(); renderDeck(); renderRules(); renderCalendars(); renderFeeds(); renderCameras(); renderConsole(); renderNetAdapters(); renderPhones(); renderCharge(); bindForm(); changed(); };
 // Over USB this also wakes the phone and brings the panel to the front (adb); over Wi-Fi the phone switches to the
 // page selected in the editor through the live stream.
 $('openPhone').onclick = async () => {

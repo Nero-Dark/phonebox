@@ -33,9 +33,6 @@
   "console": { "profiles": [] },
   // Steam friends widget: enter your SteamID64 and a user Web API key in Settings › General (see docs/STEAM.md)
   "steam": { "enabled": false, "steamId": null, "apiKey": null },
-  // Wake the phone over ADB and swipe it open (Settings › General). Off by default; it acts on the phone
-  // chosen in the Phone connection card: when the screen is off it sends KEYCODE_WAKEUP, then swipes up.
-  "adbWake": { "enabled": false },
 
   // Night mode: between these times the screen dims and only the clock stays. Tap to wake it for 30 s.
   "night": { "enabled": true, "start": "00:30", "end": "07:30", "brightness": 0.02 },

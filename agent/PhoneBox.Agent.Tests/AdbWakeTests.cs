@@ -4,67 +4,70 @@ using PhoneBox.Agent;
 using Xunit;
 
 /// <summary>
-/// The wake-and-unlock feature (against a fake adb that logs its calls; never the real adb or a phone):
-/// a phone whose last resumed activity is PhoneBox is woken (KEYCODE_WAKEUP) and swiped up; one showing
-/// anything else is left alone; a screen that is already on and locked only gets the swipe. The wake target
-/// is the phone chosen in the Phone connection card (the panel phone), it is never woken while the computer
-/// is locked, and a screen whose state cannot be read is not touched.
+/// The wake-and-unlock a newly plugged-in phone gets when Settings › Display › wake and unlock is on: after the phone
+/// is woken, the agent asks it whether a keyguard is up and only then steps over it, so nothing that is not a lock
+/// screen ever receives the swipe. A secure PIN, pattern or password is never passed: "wm dismiss-keyguard" refuses
+/// those by itself, which is Android's rule and not one this agent enforces. On Windows this is the only unlock the
+/// agent does, since following the computer's lock (next door, in the apply-screen test) is macOS-only.
+///
+/// Like the other ADB tests, this runs the real AdbReverse against a fake adb that logs its calls and answers with
+/// canned text, never the real adb or a real phone. The parser is fed the lines real Android builds print, in both
+/// orders, on a build that prints neither flag, and on a dump that cannot be read.
+///
+/// The file is kept ASCII, as the other ADB tests are: characters a Windows console mangles on an old codepage make a
+/// diff hard to read, so the languages the parser is tried against are named here and written as escapes in the
+/// fixtures, which JSON and UTF-8 pass through untouched.
 /// </summary>
 [Collection("adb session")] // SessionEndingTests flips the static session-ending window
 public sealed class AdbWakeTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "phonebox-adb-wake-" + Guid.NewGuid().ToString("N"));
-    private string _adbPath = "";
     public AdbWakeTests() => Directory.CreateDirectory(_dir);
     public void Dispose() { try { Directory.Delete(_dir, true); } catch { } }
 
     private string CallLog => Path.Combine(_dir, "calls.log");
 
     /// <summary>
-    /// <paramref name="device"/> attached; its screen is <paramref name="power"/> ("OFF" / "ON"), its last resumed
-    /// activity is <paramref name="resumed"/>, and its current focus is <paramref name="focus"/> (an activity
-    /// component, "null" for no focused window, "NotificationShade" for the component-less keyguard window). When
-    /// <paramref name="overrideSize"/> is set, "wm size" reports it on top of the physical 1080x2400.
+    /// A fake adb with <paramref name="devices"/> attached and the PhoneBox panel installed. Its "dumpsys window"
+    /// answer is <paramref name="windowDump"/>, which is what decides whether the keyguard gets stepped over.
     /// </summary>
-    private string FakeAdb(string power, string resumed, string focus, string device = "FAKE1", string? overrideSize = null)
+    private string FakeAdb(string windowDump, string[]? devices = null)
     {
-        var focusLine = focus == "null" ? "mCurrentFocus=null" : $"mCurrentFocus=Window{{abc u0 {focus}}}";
+        devices ??= ["FAKE1"];
+        // cmd.exe ends a parenthesised group at the first ")", so a dump that carries one is escaped.
+        var batch = windowDump.Replace(")", "^)");
         if (OperatingSystem.IsWindows())
         {
-            var size = overrideSize is null
-                ? "echo Physical size: 1080x2400"
-                : $"echo Physical size: 1080x2400& echo Override size: {overrideSize}";
             var cmd = Path.Combine(_dir, "adb.cmd");
             File.WriteAllText(cmd, string.Join("\r\n",
                 "@echo off",
                 ">>\"%~dp0calls.log\" echo %*",
-                "if \"%1\"==\"devices\" (echo List of devices attached& echo " + device + "\tdevice& exit /b 0)",
-                $"if \"%3\"==\"shell\" if \"%4\"==\"dumpsys\" if \"%5\"==\"power\" (echo Display Power: state={power}& exit /b 0)",
-                $"if \"%3\"==\"shell\" if \"%4\"==\"dumpsys\" if \"%5\"==\"activity\" if \"%6\"==\"activities\" (echo   topResumedActivity=ActivityRecord{{123 t92 {resumed}}}& exit /b 0)",
-                $"if \"%3\"==\"shell\" if \"%4\"==\"dumpsys\" if \"%5\"==\"window\" (echo   {focusLine}& exit /b 0)",
-                $"if \"%3\"==\"shell\" if \"%4\"==\"wm\" if \"%5\"==\"size\" ({size}& exit /b 0)",
+                "if \"%1\"==\"devices\" (echo List of devices attached" + string.Concat(devices.Select(d => "& echo " + d + "\tdevice")) + "& exit /b 0)",
+                "if \"%4\"==\"getprop\" (exit /b 0)",
+                "if \"%3\"==\"reverse\" if \"%4\"==\"--list\" (exit /b 0)",
+                "if \"%4\"==\"pm\" (echo package:/data/app/base.apk& exit /b 0)",
+                "if \"%4\"==\"dumpsys\" if \"%5\"==\"window\" (echo " + batch + "& exit /b 0)",
                 "exit /b 0", ""));
-            _adbPath = cmd;
             return cmd;
         }
-        var sizeSh = overrideSize is null
-            ? "echo 'Physical size: 1080x2400'"
-            : $"echo 'Physical size: 1080x2400'; echo 'Override size: {overrideSize}'";
         var sh = Path.Combine(_dir, "adb");
         File.WriteAllText(sh, string.Join("\n",
             "#!/bin/sh",
             "echo \"$*\" >> \"$(dirname \"$0\")/calls.log\"",
-            $"if [ \"$1\" = devices ]; then printf 'List of devices attached\\n{device}\\tdevice\\n'; exit 0; fi",
-            $"if [ \"$3\" = shell ] && [ \"$4\" = dumpsys ] && [ \"$5\" = power ]; then echo 'Display Power: state={power}'; exit 0; fi",
-            $"if [ \"$3\" = shell ] && [ \"$4\" = dumpsys ] && [ \"$5\" = activity ] && [ \"$6\" = activities ]; then echo '  topResumedActivity=ActivityRecord{{123 t92 {resumed}}}'; exit 0; fi",
-            $"if [ \"$3\" = shell ] && [ \"$4\" = dumpsys ] && [ \"$5\" = window ]; then echo '  {focusLine}'; exit 0; fi",
-            $"if [ \"$3\" = shell ] && [ \"$4\" = wm ] && [ \"$5\" = size ]; then {sizeSh}; exit 0; fi",
+            "if [ \"$1\" = devices ]; then printf 'List of devices attached\\n" + string.Concat(devices.Select(d => d + "\\tdevice\\n")) + "'; exit 0; fi",
+            "if [ \"$4\" = getprop ]; then exit 0; fi",
+            "if [ \"$3\" = reverse ] && [ \"$4\" = --list ]; then exit 0; fi",
+            "if [ \"$4\" = pm ]; then echo package:/data/app/base.apk; exit 0; fi",
+            "if [ \"$4\" = dumpsys ] && [ \"$5\" = window ]; then echo '" + windowDump + "'; exit 0; fi",
             "exit 0", ""));
         File.SetUnixFileMode(sh, (UnixFileMode)0b111_101_101);
-        _adbPath = sh;
         return sh;
     }
 
+    /// <summary>
+    /// What the fake adb was called with, read the same retrying way as in the reverse test: cmd.exe holds the log
+    /// without sharing it while a call is being logged, and a test that read it then used to fail on the runners.
+    /// </summary>
     private string[] Calls()
     {
         for (var attempt = 0; ; attempt++)
@@ -80,219 +83,144 @@ public sealed class AdbWakeTests : IDisposable
         }
     }
 
-    private AdbReverse Adb()
+    /// <summary>Runs the loop until <paramref name="done"/> holds or three rounds ("adb devices" calls) went by.</summary>
+    private async Task<string[]> RunUntil(string fake, object settings, Func<string[], bool> done)
     {
-        var path = Path.Combine(_dir, "config.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(new { adbPath = FakeAdb(power: "OFF", resumed: "x", focus: "x"), adbWake = new { enabled = true } }));
-        var store = new ConfigStore(path);
-        return new AdbReverse(store, NullLogger<AdbReverse>.Instance);
-    }
-
-    private Task Wake(AdbReverse adb)
-    {
-        var wake = typeof(AdbReverse).GetMethod("WakePhoneAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        return (Task)wake.Invoke(adb, [_adbPath, "FAKE1", CancellationToken.None])!;
-    }
-
-    private Task Pass(AdbReverse adb)
-    {
-        var ensure = typeof(AdbReverse).GetMethod("Ensure", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        return (Task)ensure.Invoke(adb, [CancellationToken.None])!;
-    }
-
-    [Fact]
-    public async Task PhoneBoxOnASleepyPhoneIsWokenAndSwiped()
-    {
-        var adb = Adb();
-        // the fake answers the wake round: screen OFF, PhoneBox last resumed, launcher focused (the keyguard will be)
-        File.Delete(CallLog);
-        FakeAdb(power: "OFF", resumed: "net.oxog.phonebox.deskpanel/.MainActivity", focus: "com.android.launcher/.UxLauncher");
-        var error = await Record.ExceptionAsync(() => Wake(adb));
-        Assert.True(error is null, $"the wake failed: {error?.Message}");
-        var calls = Calls();
-        var key = calls.ToList().FindIndex(c => c == "-s FAKE1 shell input keyevent 224");
-        var swipe = calls.ToList().FindIndex(c => c == "-s FAKE1 shell input swipe 540 2040 540 1200 400");
-        Assert.True(key >= 0, "the wake key was not sent");
-        Assert.True(swipe > key, $"the swipe was not sent after the wake key: {string.Join(" | ", calls)}");
-    }
-
-    [Fact]
-    public async Task APhoneAlreadyOnAndLockedOnlyGetsTheSwipe()
-    {
-        var adb = Adb();
-        File.Delete(CallLog);
-        FakeAdb(power: "ON", resumed: "net.oxog.phonebox.deskpanel/.MainActivity", focus: "com.android.systemui/.OneShotInterceptView");
-        var error = await Record.ExceptionAsync(() => Wake(adb));
-        Assert.True(error is null, $"the wake failed: {error?.Message}");
-        var calls = Calls();
-        Assert.DoesNotContain(calls, c => c.Contains("keyevent 224", StringComparison.Ordinal));
-        Assert.Contains("-s FAKE1 shell input swipe 540 2040 540 1200 400", calls);
-    }
-
-    [Fact]
-    public async Task PhoneBoxNotOnScreenIsLeftAlone()
-    {
-        var adb = Adb();
-        File.Delete(CallLog);
-        FakeAdb(power: "OFF", resumed: "com.android.launcher/.UxLauncher", focus: "com.android.launcher/.UxLauncher");
-        var error = await Record.ExceptionAsync(() => Wake(adb));
-        Assert.True(error is null, $"the wake failed: {error?.Message}");
-        var calls = Calls();
-        Assert.DoesNotContain(calls, c => c.Contains("keyevent 224", StringComparison.Ordinal));
-        Assert.DoesNotContain(calls, c => c.Contains("input swipe", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task PhoneBoxAlreadyOpenGetsNothing()
-    {
-        var adb = Adb();
-        File.Delete(CallLog);
-        FakeAdb(power: "ON", resumed: "net.oxog.phonebox.deskpanel/.MainActivity", focus: "net.oxog.phonebox.deskpanel/.MainActivity");
-        var error = await Record.ExceptionAsync(() => Wake(adb));
-        Assert.True(error is null, $"the wake failed: {error?.Message}");
-        var calls = Calls();
-        Assert.DoesNotContain(calls, c => c.Contains("keyevent 224", StringComparison.Ordinal));
-        Assert.DoesNotContain(calls, c => c.Contains("input swipe", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task TheSwipeCoordinatesComeFromTheScreenSize()
-    {
-        var path = Path.Combine(_dir, "config.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(new { adbPath = FakeAdb(power: "OFF", resumed: "x", focus: "x") }));
-        var store = new ConfigStore(path);
-        File.Delete(CallLog);
-        var swipe = typeof(AdbReverse).GetMethod("SwipeUpAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
-        var error = await Record.ExceptionAsync(() => (Task)swipe.Invoke(null, [_adbPath, "FAKE1", CancellationToken.None])!);
-        Assert.True(error is null, $"the swipe failed: {error?.Message}");
-        Assert.Contains("-s FAKE1 shell input swipe 540 2040 540 1200 400", Calls());
-    }
-
-    [Fact]
-    public async Task TheSwipeUsesTheOverrideSizeWhenOneIsSet()
-    {
-        var path = Path.Combine(_dir, "config.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(new { adbPath = FakeAdb(power: "OFF", resumed: "x", focus: "x", overrideSize: "720x1600") }));
-        var store = new ConfigStore(path);
-        File.Delete(CallLog);
-        var swipe = typeof(AdbReverse).GetMethod("SwipeUpAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
-        var error = await Record.ExceptionAsync(() => (Task)swipe.Invoke(null, [_adbPath, "FAKE1", CancellationToken.None])!);
-        Assert.True(error is null, $"the swipe failed: {error?.Message}");
-        Assert.Contains("-s FAKE1 shell input swipe 360 1360 360 800 400", Calls());
-    }
-
-    [Fact]
-    public async Task APhoneWhoseScreenStateCannotBeReadIsNotTouched()
-    {
-        var adb = Adb();
-        File.Delete(CallLog);
-        FakeAdb(power: "UNKNOWN", resumed: "net.oxog.phonebox.deskpanel/.MainActivity", focus: "com.android.launcher/.UxLauncher");
-        var error = await Record.ExceptionAsync(() => Wake(adb));
-        Assert.True(error is null, $"the wake failed: {error?.Message}");
-        var calls = Calls();
-        Assert.Contains(calls, c => c == "-s FAKE1 shell dumpsys power"); // the state was asked for
-        Assert.DoesNotContain(calls, c => c.Contains("keyevent 224", StringComparison.Ordinal));
-        Assert.DoesNotContain(calls, c => c.Contains("input swipe", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task TheComponentLessKeyguardWindowIsSwipedOpen()
-    {
-        var adb = Adb();
-        File.Delete(CallLog);
-        // Android 14's keyguard is a component-less "NotificationShade" window on top of PhoneBox
-        FakeAdb(power: "ON", resumed: "net.oxog.phonebox.deskpanel/.MainActivity", focus: "NotificationShade");
-        var error = await Record.ExceptionAsync(() => Wake(adb));
-        Assert.True(error is null, $"the wake failed: {error?.Message}");
-        var calls = Calls();
-        Assert.DoesNotContain(calls, c => c.Contains("keyevent 224", StringComparison.Ordinal));
-        Assert.Contains("-s FAKE1 shell input swipe 540 2040 540 1200 400", calls);
-    }
-
-    [Fact]
-    public async Task APhoneWithNothingOnScreenIsLeftAlone()
-    {
-        var adb = Adb();
-        File.Delete(CallLog);
-        FakeAdb(power: "ON", resumed: "net.oxog.phonebox.deskpanel/.MainActivity", focus: "null");
-        var error = await Record.ExceptionAsync(() => Wake(adb));
-        Assert.True(error is null, $"the wake failed: {error?.Message}");
-        var calls = Calls();
-        Assert.DoesNotContain(calls, c => c.Contains("keyevent 224", StringComparison.Ordinal));
-        Assert.DoesNotContain(calls, c => c.Contains("input swipe", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task TheWakeFollowsThePanelPhone()
-    {
-        // FAKE2 is attached and is the phone chosen in the Phone connection card: the wake target is that phone,
-        // so FAKE2 is woken and nothing else is touched.
-        var path = Path.Combine(_dir, "config.json");
-        var fake = FakeAdb(power: "OFF", resumed: "net.oxog.phonebox.deskpanel/.MainActivity", focus: "com.android.launcher/.UxLauncher", device: "FAKE2");
-        File.WriteAllText(path, JsonSerializer.Serialize(new { adbPath = fake, deviceSerial = "FAKE2", adbWake = new { enabled = true } }));
-        var store = new ConfigStore(path);
-        using var adb = new AdbReverse(store, NullLogger<AdbReverse>.Instance);
-        var error = await Record.ExceptionAsync(() => Pass(adb));
-        Assert.True(error is null, $"the round failed: {error?.Message}");
-        var calls = Calls();
-        var key = calls.ToList().FindIndex(c => c == "-s FAKE2 shell input keyevent 224");
-        var swipe = calls.ToList().FindIndex(c => c == "-s FAKE2 shell input swipe 540 2040 540 1200 400");
-        Assert.True(key >= 0, $"the wake key was not sent to the panel phone FAKE2: {string.Join(" | ", calls)}");
-        Assert.True(swipe > key, $"the swipe was not sent after the wake key: {string.Join(" | ", calls)}");
-    }
-
-    [Fact]
-    public async Task APhoneThatIsNotThePanelPhoneIsNeverWoken()
-    {
-        // FAKE1 is attached but the panel phone is FAKE2 (not attached): the wake target is the panel phone, so
-        // FAKE1 — which is not the panel phone — is left alone even with wake enabled.
-        var path = Path.Combine(_dir, "config.json");
-        var fake = FakeAdb(power: "OFF", resumed: "net.oxog.phonebox.deskpanel/.MainActivity", focus: "com.android.launcher/.UxLauncher", device: "FAKE1");
-        File.WriteAllText(path, JsonSerializer.Serialize(new { adbPath = fake, deviceSerial = "FAKE2", adbWake = new { enabled = true } }));
-        var store = new ConfigStore(path);
-        using var adb = new AdbReverse(store, NullLogger<AdbReverse>.Instance);
-        var error = await Record.ExceptionAsync(() => Pass(adb));
-        Assert.True(error is null, $"the round failed: {error?.Message}");
-        var calls = Calls();
-        Assert.DoesNotContain(calls, c => c.Contains("keyevent 224", StringComparison.Ordinal));
-        Assert.DoesNotContain(calls, c => c.Contains("input swipe", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task APhoneIsNeverWokenWhileTheLockedComputerFollowsTheLock()
-    {
-        var path = Path.Combine(_dir, "config.json");
-        var fake = FakeAdb(power: "OFF", resumed: "net.oxog.phonebox.deskpanel/.MainActivity", focus: "com.android.launcher/.UxLauncher");
-        File.WriteAllText(path, JsonSerializer.Serialize(new { adbPath = fake, deviceSerial = "FAKE1", adbWake = new { enabled = true }, display = new { followComputerLock = true } }));
-        var store = new ConfigStore(path);
-        using var adb = new AdbReverse(store, NullLogger<AdbReverse>.Instance);
-        AdbReverse.ComputerLocked = () => true; // the computer's screen is locked (macOS console session)
+        var cfgPath = Path.Combine(_dir, "config.json");
+        File.WriteAllText(cfgPath, JsonSerializer.Serialize(settings));
+        var store = new ConfigStore(cfgPath);
+        Assert.Equal(fake, AdbReverse.FindAdb(store.Get().AdbPath)); // never reach the real adb
+        var adb = new AdbReverse(store, NullLogger<AdbReverse>.Instance);
+        using var cts = new CancellationTokenSource();
+        await adb.StartAsync(cts.Token);
         try
         {
-            var error = await Record.ExceptionAsync(() => Pass(adb));
-            Assert.True(error is null, $"the round failed: {error?.Message}");
-            var calls = Calls();
-            Assert.DoesNotContain(calls, c => c.Contains("keyevent 224", StringComparison.Ordinal));
-            Assert.DoesNotContain(calls, c => c.Contains("input swipe", StringComparison.Ordinal));
+            for (var i = 0; i < 300; i++)
+            {
+                var calls = Calls();
+                if (done(calls) || calls.Count(c => c == "devices") >= 3) break;
+                await Task.Delay(100);
+            }
+            return Calls();
         }
-        finally { AdbReverse.ComputerLocked = () => false; }
+        finally { cts.Cancel(); try { await adb.StopAsync(CancellationToken.None); } catch { } }
+    }
+
+    /// <summary>Wakes the phone and brings the panel up the way the follow-the-computer-lock path does, with the
+    /// unlock stepped over only when the phone says a keyguard is up.</summary>
+    private static async Task ApplyScreenAsync(AdbReverse adb, string device, bool locked)
+    {
+        var apply = typeof(AdbReverse).GetMethod("ApplyScreenAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        await (Task)apply.Invoke(adb, [device, locked, CancellationToken.None])!;
+    }
+
+    [Theory] // the two flags real Android builds print, in either order, and what stands in for them when they are absent
+    [InlineData("mShowingLockscreen=true", true)]
+    [InlineData("isKeyguardShowing=true", true)]
+    [InlineData("mShowingLockscreen=false\n  isKeyguardShowing=true", true)]
+    [InlineData("isKeyguardShowing=true\nmShowingLockscreen=false", true)]
+    [InlineData("", false)]
+    [InlineData("\n", false)]
+    [InlineData("mShowingLockscreen=false\nisKeyguardShowing=false", false)]
+    // an older build (the 5.1 emulator in CI) names the keyguard service without saying whether it is showing
+    [InlineData("mKeyguardServiceConnected=true\n  KeyguardServiceDelegate: mDeviceInteractive=true", false)]
+    // a dump that could not be read at all, which must not be taken for a keyguard
+    [InlineData("error: device offline", false)]
+    [InlineData("error: closed", false)]
+    public void KeyguardShowingFollowsTheFlagOfEachAndroidBuild(string dump, bool expected)
+    {
+        Assert.Equal(expected, AdbReverse.KeyguardShowing(dump));
     }
 
     [Fact]
-    public void TheDumpsysParsersReadTheWindowsAndActivities()
+    public void WakeOnUnlockIsOffByDefault()
     {
-        Assert.Equal("net.oxog.phonebox.deskpanel/.MainActivity",
-            AdbReverse.CurrentFocusWindow("  mCurrentFocus=Window{a3b2c3d u0 net.oxog.phonebox.deskpanel/.MainActivity}\n"));
-        Assert.Equal("NotificationShade",
-            AdbReverse.CurrentFocusWindow("  mCurrentFocus=Window{a3b2c3d u0 NotificationShade}\n"));
-        Assert.Equal(AdbReverse.NoFocus, AdbReverse.CurrentFocusWindow("  mCurrentFocus=null\n"));
-        Assert.Null(AdbReverse.CurrentFocusWindow("  mFocusedApp=AppWindow{a3b2c3d u0 com.android.launcher/.UxLauncher}\n"));
-        Assert.Equal("OFF", AdbReverse.PowerState("  Display Power: state=OFF\n"));
-        Assert.Equal("ON", AdbReverse.PowerState("  Display Power: state=ON\n"));
-        Assert.Null(AdbReverse.PowerState("  Display Power: state=DOZE\n"));
-        Assert.Null(AdbReverse.PowerState(""));
-        Assert.Equal("net.oxog.phonebox.deskpanel/.MainActivity",
-            AdbReverse.LastResumedActivity("  topResumedActivity=ActivityRecord{123 t92 net.oxog.phonebox.deskpanel/.MainActivity}\n"));
-        Assert.Null(AdbReverse.LastResumedActivity("ActivityManager: no resumed activity\n"));
+        var path = Path.Combine(_dir, "config.json");
+        File.WriteAllText(path, "{}");
+        Assert.False(new ConfigStore(path).Get().Display.WakeOnUnlock);
+    }
+
+    /// <summary>
+    /// A phone that sleeps on its keyguard needs the keyguard stepped over, not just woken: waking alone leaves the
+    /// panel behind the lock screen. The agent asks first, so a phone with no keyguard never gets a swipe that would
+    /// land on whatever it happens to be showing instead.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task APluggedInPhoneIsUnlockedOnlyWhenTheSettingIsOn(bool wakeOnUnlock)
+    {
+        var fake = FakeAdb("mShowingLockscreen=true");
+        var calls = await RunUntil(fake, new { adbPath = fake, deviceSerial = "FAKE1",
+                display = new { homeScreen = false, keepAwake = false, followComputerLock = false, openOnConnect = true, wakeOnUnlock } },
+            c => c.Contains("-s FAKE1 shell am start -n net.oxog.phonebox.deskpanel/.MainActivity"));
+
+        var opened = Array.IndexOf(calls, "-s FAKE1 shell am start -n net.oxog.phonebox.deskpanel/.MainActivity");
+        Assert.True(opened >= 0, "the panel is opened:\n" + string.Join("\n", calls));
+        Assert.Contains("-s FAKE1 shell input keyevent KEYCODE_WAKEUP", calls);
+        var asked = Array.IndexOf(calls, "-s FAKE1 shell dumpsys window");
+        var dismissed = Array.IndexOf(calls, "-s FAKE1 shell wm dismiss-keyguard");
+        if (!wakeOnUnlock)
+        {
+            Assert.False(dismissed >= 0, "nothing is stepped over without the setting:\n" + string.Join("\n", calls));
+            // the phone is not even asked, since an agent that will not unlock has no use for the answer
+            Assert.False(asked >= 0 && asked < opened, "the setting is read before the phone is asked:\n" + string.Join("\n", calls));
+            return;
+        }
+        Assert.True(asked >= 0, "the phone is asked whether a keyguard is up:\n" + string.Join("\n", calls));
+        Assert.True(dismissed >= 0, "the keyguard is stepped over:\n" + string.Join("\n", calls));
+        // asked, stepped over, panel: the answer has to arrive before the swipe, the swipe before the panel is shown
+        Assert.True(asked < dismissed);
+        Assert.True(dismissed < opened);
+    }
+
+    /// <summary>A phone that reports no keyguard (already unlocked, or a swipe-less lock) is not asked to dismiss one,
+    /// and the panel still comes up.</summary>
+    [Fact]
+    public async Task APluggedInPhoneWithNoKeyguardKeepsWhatItIsShowing()
+    {
+        var fake = FakeAdb("mShowingLockscreen=false\nisKeyguardShowing=false");
+        var calls = await RunUntil(fake, new { adbPath = fake, deviceSerial = "FAKE1",
+                display = new { homeScreen = false, keepAwake = false, followComputerLock = false, openOnConnect = true, wakeOnUnlock = true } },
+            c => c.Contains("-s FAKE1 shell am start -n net.oxog.phonebox.deskpanel/.MainActivity"));
+
+        Assert.Contains("-s FAKE1 shell dumpsys window", calls);
+        Assert.DoesNotContain("-s FAKE1 shell wm dismiss-keyguard", calls);
+        Assert.Contains("-s FAKE1 shell am start -n net.oxog.phonebox.deskpanel/.MainActivity", calls);
+    }
+
+    /// <summary>A build this release cannot read (neither flag, as on old Android) still gets the panel: not being able
+    /// to answer about the keyguard costs the unlock, never the panel itself.</summary>
+    [Fact]
+    public async Task AnOldPhoneStillGetsThePanelWhenItCannotAnswerAboutItsKeyguard()
+    {
+        var fake = FakeAdb("mKeyguardServiceConnected=true\n  KeyguardServiceDelegate: mDeviceInteractive=true");
+        var calls = await RunUntil(fake, new { adbPath = fake, deviceSerial = "FAKE1",
+                display = new { homeScreen = false, keepAwake = false, followComputerLock = false, openOnConnect = true, wakeOnUnlock = true } },
+            c => c.Contains("-s FAKE1 shell am start -n net.oxog.phonebox.deskpanel/.MainActivity"));
+
+        Assert.DoesNotContain("-s FAKE1 shell wm dismiss-keyguard", calls);
+        Assert.Contains("-s FAKE1 shell am start -n net.oxog.phonebox.deskpanel/.MainActivity", calls);
+    }
+
+    /// <summary>The follow-the-computer-lock path already asked Android to step over the keyguard every time the
+    /// computer unlocked, whether or not the phone was on one. It now asks first, so a phone that is sitting on the
+    /// panel gets the wake and nothing else.</summary>
+    [Theory]
+    [InlineData(true, true)]  // on its keyguard: stepped over
+    [InlineData(false, false)] // already unlocked: no swipe, nothing else disturbed
+    public async Task ThePhoneIsOnlySteppedOverWhenItIsOnItsKeyguard(bool keyguard, bool expectDismissed)
+    {
+        var fake = FakeAdb(keyguard ? "isKeyguardShowing=true" : "isKeyguardShowing=false");
+        var path = Path.Combine(_dir, "config.json");
+        File.WriteAllText(path, JsonSerializer.Serialize(new { adbPath = fake, deviceSerial = "FAKE1",
+            display = new { homeScreen = false, keepAwake = false, followComputerLock = true } }));
+        using var adb = new AdbReverse(new ConfigStore(path), NullLogger<AdbReverse>.Instance);
+
+        await ApplyScreenAsync(adb, "FAKE1", locked: false);
+
+        Assert.Contains("-s FAKE1 shell input keyevent KEYCODE_WAKEUP", Calls());
+        Assert.Contains("-s FAKE1 shell am start -n net.oxog.phonebox.deskpanel/.MainActivity", Calls());
+        Assert.Equal(expectDismissed, Calls().Contains("-s FAKE1 shell wm dismiss-keyguard"));
     }
 }

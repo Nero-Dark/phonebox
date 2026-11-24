@@ -26,8 +26,6 @@ public sealed class AgentConfig
     /// <summary>OpenCode prompts and sessions on the phone; everything is off until the settings page turns it on.</summary>
     [JsonPropertyName("opencode")]
     public OpenCodeConfig OpenCode { get; set; } = new();
-    /// <summary>Wake and unlock the phone over ADB (its own device selector; off by default).</summary>
-    public AdbWakeConfig AdbWake { get; set; } = new();
     public List<PageConfig> Pages { get; set; } = [];
     public List<Shortcut> Shortcuts { get; set; } = [];
     public List<RuleConfig> Rules { get; set; } = [];
@@ -216,6 +214,9 @@ public sealed class DisplayConfig
     public bool OpenOnConnect { get; set; } = true;
     /// <summary>On macOS, sleep the connected phone when the computer locks; wake it and open PhoneBox after unlock.</summary>
     public bool FollowComputerLock { get; set; }
+    /// <summary>When PhoneBox is opened over USB (plugged in, or unlocked with follow the computer lock), step over a
+    /// swipe-only lock screen. A PIN, pattern or password is never passed. Off: the phone shows its lock screen.</summary>
+    public bool WakeOnUnlock { get; set; }
     /// <summary>The page the panel returns to (idle return, Back); null = the first page.</summary>
     public string? HomePage { get; set; }
     /// <summary>Seconds the panel counts down ("Switching to … in 3") before a rule or the idle return changes the page; 0 = at once.</summary>
@@ -226,18 +227,6 @@ public sealed class DisplayConfig
     public int MinDwellSec { get; set; } = 15;
     /// <summary>A rule keeps its page at most this many minutes, then the idle return may take over; 0 = as long as the rule lasts.</summary>
     public int HoldMaxMin { get; set; } = 30;
-}
-
-/// <summary>
-/// Wake the paired phone over ADB and swipe it open: when its screen is off the agent sends
-/// KEYCODE_WAKEUP, then swipes up so the phone lands in PhoneBox; a screen that is already on
-/// but locked only gets the swipe. It always acts on the phone chosen in the Phone connection
-/// card. Off by default.
-/// </summary>
-public sealed class AdbWakeConfig
-{
-    /// <summary>Turn the feature on. Default false — the phone stays asleep until you ask for it.</summary>
-    public bool Enabled { get; set; } = false;
 }
 
 public sealed class LanConfig
@@ -676,7 +665,6 @@ public sealed partial class ConfigStore(string path)
         c.OpenCode ??= new();
         c.OpenCode.TimeoutSec = Math.Clamp(c.OpenCode.TimeoutSec, 10, 3600);
         c.OpenCode.AlwaysCountdownSec = Math.Clamp(c.OpenCode.AlwaysCountdownSec, 0, 60);
-        c.AdbWake ??= new();
         if (string.IsNullOrWhiteSpace(c.Updates.Repo)) c.Updates.Repo = "ersinkoc/phonebox";
         c.Lan.Port = Math.Clamp(c.Lan.Port, 1024, 65535);
         if (string.IsNullOrWhiteSpace(c.Lan.Token)) c.Lan.Token = NewToken();
