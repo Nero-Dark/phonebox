@@ -903,6 +903,7 @@ window.PhoneBoxLocaleData = Object.assign(window.PhoneBoxLocaleData || {}, {
       "s.wh.exTtl": "تنتهي الصلاحية بعد 10 دقائق",
       "s.wh.exNotify": "إرسال إشعار إلى الهاتف",
       "s.wh.exGoto": "عرض صفحة محددة على الهاتف",
+      "s.wh.exGotoNext": "الصفحة التالية والسابقة",
       "s.wh.exRefresh": "تحديث جميع البيانات فورًا",
       "s.k.customIcon": "صورة الأيقونة المخصصة",
       "s.k.customIconSaveFirst": "احفظ الاختصار أولًا لتتمكن من رفع صورة مخصّصة لأيقونته.",

@@ -903,6 +903,7 @@ window.PhoneBoxLocaleData = Object.assign(window.PhoneBoxLocaleData || {}, {
       "s.wh.exTtl": "10分鐘後過期",
       "s.wh.exNotify": "電話上的通知",
       "s.wh.exGoto": "把手機轉到一個頁面",
+      "s.wh.exGotoNext": "下一頁和上一頁",
       "s.wh.exRefresh": "重新整理所有資料",
       "s.k.customIcon": "自定義圖標",
       "s.k.customIconSaveFirst": "儲存一次以在此上傳自定義圖標圖像。",

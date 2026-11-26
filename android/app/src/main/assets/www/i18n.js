@@ -5443,7 +5443,7 @@
       's.wh.exTtl': 'Expira após 10 minutos',
       's.wh.exNotify': 'Notificação no telefone',
       's.wh.exGoto': 'Trocar a página do telefone',
-      's.wh.exGotoNext': 'Próxima e página anterior',
+      's.wh.exGotoNext': 'Página seguinte e anterior',
       's.wh.exRefresh': 'Atualizar tudo agora',
       's.k.customIcon': 'Imagem de ícone personalizado',
       's.k.customIconSaveFirst': 'Salve uma vez para enviar aqui uma imagem de ícone personalizado.',

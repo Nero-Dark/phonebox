@@ -1489,8 +1489,9 @@ export function handleEvent(e) {
   if (e.kind === 'approval' || e.kind === 'approval-done') loadApprovals();
   else if (e.kind === 'notify' && e.data) handleNotify(e.data);
   else if (e.kind === 'goto' && e.data) {
-    // "next" and "prev" are relative: the panel alone knows which page it shows, so they step without a queue (#616)
-    if (e.data.page === 'next' || e.data.page === 'prev') stepPage(e.data.page);
+    // "next" and "prev" are relative: the panel alone knows which page it shows, so they step without a queue (#616).
+    // They carry e.data.step, not e.data.page: a page id called "next" or "prev" must keep working through the queue.
+    if (e.data.step === 'next' || e.data.step === 'prev') stepPage(e.data.step);
     else requestPage(e.data);
   }
   else if (e.kind === 'back' && e.data) requestBack(e.data.rule);
@@ -1895,7 +1896,7 @@ export function gotoPageRef(ref) {
 export function stepPage(dir) {
   if (PREVIEW || pages.length < 2) return;
   lastTouch = Date.now();
-  goPage(curPage + (dir === 'prev' ? -1 : 1));
+  goPage(curPage + (dir === 'prev' ? -1 : 1), true);
 }
 
 let procsSort = 'cpu';

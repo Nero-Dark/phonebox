@@ -614,8 +614,9 @@ app.MapPost("/api/goto/{page}", (string page, int? countdown, PushStore push) =>
     Results.Json(push.Emit("goto", JsonSerializer.SerializeToElement(new { page, countdown = countdown is { } c ? Math.Clamp(c, 0, 30) : (int?)null }))));
 
 // "next" and "prev" are relative: only the phone knows which page it shows, and it clamps at the edges (#616).
-app.MapPost("/api/goto/next", (PushStore push) => Results.Json(push.Emit("goto", JsonSerializer.SerializeToElement(new { page = "next" }))));
-app.MapPost("/api/goto/prev", (PushStore push) => Results.Json(push.Emit("goto", JsonSerializer.SerializeToElement(new { page = "prev" }))));
+// The payload carries a "step" field, not a "page": a page id called "next" must keep meaning that page.
+app.MapPost("/api/goto/next", (PushStore push) => Results.Json(push.Emit("goto", JsonSerializer.SerializeToElement(new { step = "next" }))));
+app.MapPost("/api/goto/prev", (PushStore push) => Results.Json(push.Emit("goto", JsonSerializer.SerializeToElement(new { step = "prev" }))));
 
 app.MapPost("/api/refresh", (bool? reload, PushStore push) =>
 {

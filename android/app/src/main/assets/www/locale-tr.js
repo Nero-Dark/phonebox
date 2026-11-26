@@ -339,6 +339,7 @@ window.PhoneBoxLocaleData = Object.assign(window.PhoneBoxLocaleData || {}, {
       "s.wh.exTtl": "10 dakika sonra sona erer",
       "s.wh.exNotify": "Telefonda bildirim",
       "s.wh.exGoto": "Telefonu bir sayfaya çevir",
+      "s.wh.exGotoNext": "Sonraki ve önceki sayfa",
       "s.wh.exRefresh": "Her şeyi şimdi yenile",
       "s.k.customIcon": "Özel simge resimleri",
       "s.k.customIconSaveFirst": "Özel bir ikon resmi yüklemek için burada bir kez kaydet.",

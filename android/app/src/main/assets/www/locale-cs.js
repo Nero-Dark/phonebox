@@ -903,6 +903,7 @@ window.PhoneBoxLocaleData = Object.assign(window.PhoneBoxLocaleData || {}, {
       "s.wh.exTtl": "Platnost vyprší po 10 minutách",
       "s.wh.exNotify": "Oznámení na telefonu",
       "s.wh.exGoto": "Přepnutí telefonu na stránku",
+      "s.wh.exGotoNext": "Další a předchozí stránka",
       "s.wh.exRefresh": "Obnovit vše teď",
       "s.k.customIcon": "Vlastní ikona obrázek",
       "s.k.customIconSaveFirst": "Uložte jednou pro nahrání vlastní ikony zde.",

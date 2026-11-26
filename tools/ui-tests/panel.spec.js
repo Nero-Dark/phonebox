@@ -268,21 +268,55 @@ test('next and prev from the computer step one page at a time, without a countdo
   await expect(page.locator('.w').first()).toBeVisible();
   const dot = () => activeDot(page);
   // next: immediate, and no countdown card
-  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { page: 'next' }));
+  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { step: 'next' }));
   await expect.poll(dot, { timeout: 8000 }).toBe(1);
   await expect(page.locator('#navCard')).not.toHaveClass(/on/);
   // next keeps stepping until the last page, where it stays
-  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { page: 'next' }));
+  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { step: 'next' }));
   await expect.poll(dot).toBe(2);
-  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { page: 'next' }));
+  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { step: 'next' }));
   await expect.poll(dot).toBe(2);
   // prev goes back, and stays at the first page
-  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { page: 'prev' }));
+  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { step: 'prev' }));
   await expect.poll(dot).toBe(1);
-  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { page: 'prev' }));
+  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { step: 'prev' }));
   await expect.poll(dot).toBe(0);
-  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { page: 'prev' }));
+  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { step: 'prev' }));
   await expect.poll(dot).toBe(0);
+});
+
+test('two next requests in a row each step one page (#616)', async ({ page }) => {
+  await page.addInitScript((config) => localStorage.setItem('pb-demo-config', config), JSON.stringify({
+    night: { enabled: false }, rules: [], shortcuts: [], display: { idleReturnSec: 0 },
+    pages: [
+      { id: 'home', title: 'Home', widgets: [{ id: 'n1', type: 'note', x: 0, y: 0, w: 12, h: 6, options: { text: 'Home' } }] },
+      { id: 'mid', title: 'Mid', widgets: [{ id: 'n2', type: 'note', x: 0, y: 0, w: 12, h: 6, options: { text: 'Mid' } }] },
+      { id: 'end', title: 'End', widgets: [{ id: 'n3', type: 'note', x: 0, y: 0, w: 12, h: 6, options: { text: 'End' } }] },
+    ],
+  }));
+  await page.goto('/panel/');
+  await expect(page.locator('.w').first()).toBeVisible();
+  // back-to-back, with no wait between: the second request must start from the page the first one landed on
+  await page.evaluate(() => {
+    window.PhoneBoxDemo.emit('goto', { step: 'next' });
+    window.PhoneBoxDemo.emit('goto', { step: 'next' });
+  });
+  await expect.poll(() => activeDot(page), { timeout: 8000 }).toBe(2);
+});
+
+test('a page id called "next" keeps going through the rule queue (#616)', async ({ page }) => {
+  await page.addInitScript((config) => localStorage.setItem('pb-demo-config', config), JSON.stringify({
+    night: { enabled: false }, rules: [], shortcuts: [], display: { idleReturnSec: 0 },
+    pages: [
+      { id: 'home', title: 'Home', widgets: [{ id: 'n1', type: 'note', x: 0, y: 0, w: 12, h: 6, options: { text: 'Home' } }] },
+      { id: 'next', title: 'Next', widgets: [{ id: 'n2', type: 'note', x: 0, y: 0, w: 12, h: 6, options: { text: 'Next' } }] },
+    ],
+  }));
+  await page.goto('/panel/');
+  await expect(page.locator('.w').first()).toBeVisible();
+  // "next" here is a page id, not a step: a rule switches to it through the queue like any other page
+  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { page: 'next', rule: 'r1', name: 'The next page', hold: false }));
+  await expect.poll(() => activeDot(page), { timeout: 8000 }).toBe(1);
 });
 
 test('Stay cancels a rule page switch', async ({ page }) => {
