@@ -29,8 +29,9 @@ $exe = Join-Path $app 'PhoneBoxAgent.exe'
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { throw '.NET 10 SDK is required: winget install Microsoft.DotNet.SDK.10' }
 $stage = Join-Path ([IO.Path]::GetTempPath()) ('phonebox-publish-' + [guid]::NewGuid().ToString('N'))
 try {
-    Write-Host '==> Publishing agent'
-    dotnet publish (Join-Path $root 'agent\PhoneBox.Agent') -c Release -f net10.0-windows10.0.19041.0 -o $stage --nologo -v q --disable-build-servers
+    Write-Host '==> Publishing agent (self-contained: no .NET runtime needed on this computer)'
+    # Self-contained single file, as in build.ps1: the machine needs no .NET runtime installed.
+    dotnet publish (Join-Path $root 'agent\PhoneBox.Agent') -c Release -f net10.0-windows10.0.19041.0 -r win-x64 --self-contained true -p:PublishSingleFile=true -o $stage --nologo -v q --disable-build-servers
     if ($LASTEXITCODE) { throw "dotnet publish failed (exit code $LASTEXITCODE); the installed agent was not updated" }
     if (-not (Test-Path -LiteralPath (Join-Path $stage 'PhoneBoxAgent.exe') -PathType Leaf)) {
         throw 'publish failed: staged agent executable not found'

@@ -3170,6 +3170,7 @@ function renderWebhooks(lan) {
     [t('s.wh.exTtl'), `curl -X POST "${local}/api/push/door?ttl=600" -d open`],
     [t('s.wh.exNotify'), `curl -X POST ${local}/api/notify -H "Content-Type: application/json" -d "{\\"title\\":\\"Deploy\\",\\"text\\":\\"Production is live\\",\\"level\\":\\"ok\\"}"`],
     [t('s.wh.exGoto'), `curl -X POST ${local}/api/goto/music`],
+    [t('s.wh.exGotoNext'), `curl -X POST ${local}/api/goto/next`],
     [t('s.wh.exRefresh'), `curl -X POST ${local}/api/refresh`],
     ['PowerShell', `Invoke-RestMethod -Method Post ${local}/api/push/cpu-fan -Body 1450`],
   ];

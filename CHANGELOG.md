@@ -19,11 +19,17 @@
   one way and `−5.7h` the other (#630, [KPuneethHarshaNaik](https://github.com/KPuneethHarshaNaik)).
 - Windows: LibreHardwareMonitor's port can be set below the preview in Settings › Pages (8085 by default), for a PC
   where another service already uses 8085 (#628, [DaliBerr](https://github.com/DaliBerr)).
+- Webhooks: **next and previous page from the computer** — `POST /api/goto/next` and `/api/goto/prev` switch the phone
+  to its next or previous page, clamped at the edges; the phone resolves them, so a keyboard add-on needs no position
+  of its own (#616, [Nero-Dark](https://github.com/Nero-Dark)).
 - README: the PhoneBox Keyboard Add-on joins the Community add-ons list: global Windows shortcuts for pages (#616,
   #631, [Ultraalmir](https://github.com/Ultraalmir)).
 - README: the Games Tab add-on's row lists its Steam store lookup (#612, [lucasaz](https://github.com/lucasaz)).
 - Development: an `.editorconfig` with the style the code already follows, and the agent builds without warnings on
   Windows (#615, [elong365](https://github.com/elong365)).
+- Development: `scripts/install.ps1` now builds a self-contained single-file agent, so installing from source no
+  longer needs a .NET runtime on the machine, matching `build.ps1` and the README
+  ([Nero-Dark](https://github.com/Nero-Dark)).
 
 ## 0.9.30 — 2026-11-25
 

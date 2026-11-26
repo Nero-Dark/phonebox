@@ -1488,7 +1488,11 @@ export function handleEvent(e) {
   if (PREVIEW && (e.kind === 'goto' || e.kind === 'back' || e.kind === 'reload')) return; // the editor picks the page
   if (e.kind === 'approval' || e.kind === 'approval-done') loadApprovals();
   else if (e.kind === 'notify' && e.data) handleNotify(e.data);
-  else if (e.kind === 'goto' && e.data) requestPage(e.data);
+  else if (e.kind === 'goto' && e.data) {
+    // "next" and "prev" are relative: the panel alone knows which page it shows, so they step without a queue (#616)
+    if (e.data.page === 'next' || e.data.page === 'prev') stepPage(e.data.page);
+    else requestPage(e.data);
+  }
   else if (e.kind === 'back' && e.data) requestBack(e.data.rule);
   else if (e.kind === 'refresh') { loadConfig(); loadQuotas(); loadWork(); loadPush(); loadWeather(true); loadCalendar(); }
   else if (e.kind === 'reload') location.reload();
@@ -1884,6 +1888,14 @@ export function gotoPageRef(ref) {
   lastTouch = Date.now();
   goPage(n, Math.abs(n - curPage) > 1);
   return n;
+}
+
+/** The next or previous page from the computer (/api/goto/next, /api/goto/prev): the panel alone knows which page it
+ *  shows, so the request carries no position of its own (#616). Like a swipe or an arrow key: it does not queue. */
+export function stepPage(dir) {
+  if (PREVIEW || pages.length < 2) return;
+  lastTouch = Date.now();
+  goPage(curPage + (dir === 'prev' ? -1 : 1));
 }
 
 let procsSort = 'cpu';

@@ -255,6 +255,36 @@ test('a webhook switches pages after a countdown', async ({ page }) => {
   await expect(page.locator('#navCard')).not.toHaveClass(/on/);
 });
 
+test('next and prev from the computer step one page at a time, without a countdown (#616)', async ({ page }) => {
+  await page.addInitScript((config) => localStorage.setItem('pb-demo-config', config), JSON.stringify({
+    night: { enabled: false }, rules: [], shortcuts: [], display: { idleReturnSec: 0 },
+    pages: [
+      { id: 'home', title: 'Home', widgets: [{ id: 'n1', type: 'note', x: 0, y: 0, w: 12, h: 6, options: { text: 'Home' } }] },
+      { id: 'mid', title: 'Mid', widgets: [{ id: 'n2', type: 'note', x: 0, y: 0, w: 12, h: 6, options: { text: 'Mid' } }] },
+      { id: 'end', title: 'End', widgets: [{ id: 'n3', type: 'note', x: 0, y: 0, w: 12, h: 6, options: { text: 'End' } }] },
+    ],
+  }));
+  await page.goto('/panel/');
+  await expect(page.locator('.w').first()).toBeVisible();
+  const dot = () => activeDot(page);
+  // next: immediate, and no countdown card
+  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { page: 'next' }));
+  await expect.poll(dot, { timeout: 8000 }).toBe(1);
+  await expect(page.locator('#navCard')).not.toHaveClass(/on/);
+  // next keeps stepping until the last page, where it stays
+  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { page: 'next' }));
+  await expect.poll(dot).toBe(2);
+  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { page: 'next' }));
+  await expect.poll(dot).toBe(2);
+  // prev goes back, and stays at the first page
+  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { page: 'prev' }));
+  await expect.poll(dot).toBe(1);
+  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { page: 'prev' }));
+  await expect.poll(dot).toBe(0);
+  await page.evaluate(() => window.PhoneBoxDemo.emit('goto', { page: 'prev' }));
+  await expect.poll(dot).toBe(0);
+});
+
 test('Stay cancels a rule page switch', async ({ page }) => {
   await page.goto('/panel/');
   await expect(page.locator('.w').first()).toBeVisible();

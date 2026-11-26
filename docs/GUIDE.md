@@ -487,6 +487,7 @@ curl -X POST http://127.0.0.1:8765/api/notify -H "Content-Type: application/json
      -d '{"title":"Deploy","text":"Production is live","level":"ok","page":"feeds"}' # toast + vibration (+ switch page)
 curl -X POST http://127.0.0.1:8765/api/goto/music                                     # switch the phone to a page (id or number)
 curl -X POST "http://127.0.0.1:8765/api/goto/music?countdown=0"                        # …without the on-screen countdown
+curl -X POST http://127.0.0.1:8765/api/goto/next                                       # one page forward (or /api/goto/prev back)
 curl -X POST http://127.0.0.1:8765/api/refresh                                        # refresh quotas/GitHub and the panel now (?reload=1 reloads it)
 ```
 
